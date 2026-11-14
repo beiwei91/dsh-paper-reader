@@ -40,8 +40,10 @@
     "client.*.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "docs",
-    "icon.svg"
+    "docs/DETAIL.md",
+    "docs/preview.svg",
+    "icon.svg",
+    "THIRD-PARTY-LICENSES.md"
   ],
   "dsh": {
     "bundle": {

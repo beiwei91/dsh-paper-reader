@@ -38,7 +38,7 @@
 | `client.pdf.js` | `pdfjs-dist` 浏览器构建打包，并内联 worker 源码 | 生成产物；本项目未改动 PDF.js 源码 |
 
 - 仓库根 **`THIRD-PARTY-LICENSES.md`** 已提供：说明 PDF.js 以未修改的形式再分发（embedded in generated `lib/host.js` / `client.pdf.js`，copied as `lib/pdf.worker.mjs`），并逐字收录 `node_modules/pdfjs-dist/LICENSE` 的 Apache-2.0 全文（177 行）与 Mozilla 版权行。
-- GitHub-only 分发同样构成“再分发”，所以该文件必须在**发布 tag 的 commit 里存在**（已提交）。未来 npm 发布时还要加入 `package.json.files`（§3）。
+- GitHub-only 分发同样构成“再分发”，所以该文件必须在**发布 tag 的 commit 里存在**（已提交），并且已显式加入 `package.json.files`（§5），`pnpm pack` 与未来 npm 打包都会带上。
 - 注意：依赖由并发 agent 改动/重装，`node_modules/pdfjs-dist` 可能被更新。发布前确认版本仍是 **6.3.289**（`node -p "require('pdfjs-dist/package.json').version"`）；若变化，按新 `LICENSE` 重新生成 `THIRD-PARTY-LICENSES.md`。
 
 ### 0.3 本轮发布前的实际待办
@@ -117,6 +117,8 @@
 
 > 注：删除 `private` 与加入 `license`/`repository`/`homepage`/`bugs`/`keywords` 已在改名 commit（§2）中提前完成；npm 日从当前 `package.json` 出发只需应用下面剩余的改动。
 
+> 注：diff 里的 `files` 改动已于 2026-11-14 的打包修正 commit 应用（`docs/DETAIL.md` + `docs/preview.svg` + `THIRD-PARTY-LICENSES.md`，实测 21 文件见 §5）；下面 diff 中这几行仅作记录，npm 日无需重复应用。
+
 ```diff
  {
    "name": "dsh-paper-reader",
@@ -168,7 +170,7 @@
 - **`private` 已在 §2 删除**（删字段比 `"private": false` 更干净；npm 拒绝发布 private 包）。
 - **`engines.dsh` 建议 `>=0.2.2-rc.3 <0.3.0-0`**：devDependencies 的 DSH 类型固定 0.2.2-rc.3；语义上声明 `engines.dsh` 后只按它判定、忽略 peer，预发布参与匹配，空/非法/`workspace:` 视为不兼容。最终用真实安装验证。
 - **不需要 `dependencies`/`peerDependencies`**：`lib/host.js` 已打包 PDF.js 等依赖；客户端只把 react/react-dom 作为宿主 externals。
-- **`files`**：`"docs"` 会连带 `docs/PUBLISHING.md`、`docs/README.draft.md` 进包，所以改成精确两项；`LICENSE` npm 自动带，`THIRD-PARTY-LICENSES.md` 必须显式加入。
+- **`files`（已应用，2026-11-14）**：`"docs"` 会连带 `docs/PUBLISHING.md`、`docs/README.draft.md`、`docs/OCR-VERIFICATION.md` 进包，所以已改成精确两项 `docs/DETAIL.md` + `docs/preview.svg`；`THIRD-PARTY-LICENSES.md` 已显式加入（`LICENSE` 由 npm 自动带）。npm 日只需应用 diff 中剩余的 `engines`/`publishConfig`/`description`/`exports` 项。
 - **NPM 账号前置**：发布到 npm 需要（免费）账号 + 本机 `npm login`（可能要求 2FA 一次性密码）；unscoped 名字不需要 scope/用户名出现在包名里。首次发布即占用该名字。
 
 ### 改名步骤见 §2
@@ -205,12 +207,12 @@ git diff --stat -- client.js client.pdf.js lib/
 
 本轮**不需要** npm tarball 才能安装；GitHub tag 本身即可安装。若仍想在 Release 里附一个 tarball 供人下载：
 
-- **实测现状（2026-11-14，改名后）**：`pnpm pack --dry-run` 输出 **23** 个文件（`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/OCR-VERIFICATION.md`、`docs/preview.svg`、`docs/PUBLISHING.md`、`docs/README.draft.md`、`icon.svg`、`lib/host.js`、`lib/ocr/engine-impl.cjs`、`lib/ocr/engine.cjs`、`lib/ocr/worker.cjs`、`lib/ocr/tesseract-core-lstm.wasm`、`lib/ocr/tesseract-core-simd-lstm.wasm`、`lib/ocr/lang/eng.traineddata.gz`、`lib/ocr/lang/chi_sim.traineddata.gz`、`lib/pdf.worker.mjs`、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`）；tarball 名 `dsh-paper-reader-0.1.0.tgz`（实测 8,251,678 B ≈ 7.87 MiB）。因 `files` 仍是 `"docs"`，内部发布文档（`docs/PUBLISHING.md`、`docs/README.draft.md`）与 `docs/OCR-VERIFICATION.md` 会进包；`THIRD-PARTY-LICENSES.md` 因为不在 `files` 里**不会**进包（`LICENSE` 由 npm 自动带）。
-- **对 GitHub-only 的影响**：如果 Release 资产用 `pnpm pack` 的 tarball，它会缺 `THIRD-PARTY-LICENSES.md`（许可证不合规）且带内部文档。**建议二选一**：
-  1. Release 资产改用 `tar.gz`/`zip` 源码归档（GitHub 自动生成，包含仓库全部 tracked 文件，含 `THIRD-PARTY-LICENSES.md`），或
-  2. 在发布日临时把 §3 的 `files` 调整应用后再 `pnpm pack` 并附资产。
-- npm 发布日目标清单（`files` 精确化后）：`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`、`lib/host.js`、`lib/pdf.worker.mjs`、`lib/ocr/**`（8 个文件：engine/worker/engine-impl 与 2 个 WASM core、2 个语言包）、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`、`THIRD-PARTY-LICENSES.md`（tarball 名 `dsh-paper-reader-0.1.0.tgz`）。
-- 体积（实测，改名后）：`client.pdf.js` 1,735,431 B + `lib/pdf.worker.mjs` 2,395,538 B + `lib/host.js` 1,058,698 B + `client.js` 32,407 B ≈ 5.0 MiB（未压缩）；`lib/ocr/**` 另约 10.4 MiB；tarball 实测 8,251,678 B ≈ 7.87 MiB。
+- **实测现状（2026-11-14，`files` 精确化后）**：`pnpm pack --dry-run` 输出 **21** 个文件（`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`、`lib/host.js`、`lib/ocr/engine.cjs`、`lib/ocr/engine-impl.cjs`、`lib/ocr/worker.cjs`、`lib/ocr/tesseract-core-lstm.wasm`、`lib/ocr/tesseract-core-simd-lstm.wasm`、`lib/ocr/lang/eng.traineddata.gz`、`lib/ocr/lang/chi_sim.traineddata.gz`、`lib/pdf.worker.mjs`、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`、`THIRD-PARTY-LICENSES.md`）；tarball 名 `dsh-paper-reader-0.1.0.tgz`（实测 **8,227,726 B ≈ 7.85 MiB**，`tar -tzf` 数得 21 个 entry）。
+- **`files` 已精确化**（2026-11-14 的打包修正 commit）：`"docs"` → `"docs/DETAIL.md"` + `"docs/preview.svg"`，并显式加入 `"THIRD-PARTY-LICENSES.md"`。因此内部发布文档（`docs/PUBLISHING.md`、`docs/README.draft.md`、`docs/OCR-VERIFICATION.md`）**不再进包**，而 `THIRD-PARTY-LICENSES.md` **会**进包（`LICENSE` 仍由 npm 按惯例自动带）。包内**没有** `src/**`、`.github/**`、`scripts/**`、`market/**`、`.build/**`、`build.mjs`、`tsconfig.json`、lockfile、`testdata/**`。
+- **仍留在仓库、但不进包**：`docs/OCR-VERIFICATION.md`、`docs/PUBLISHING.md`、`docs/README.draft.md` 仍是仓库文件，GitHub 源码归档会包含它们。若希望公开仓库/源码归档也不含内部文档，应把 `docs/OCR-VERIFICATION.md` 移出仓库或删除（待人工决定，见 §15）。
+- **对 GitHub-only 的影响**：tarball 现在既含 `THIRD-PARTY-LICENSES.md`（许可证合规）又不含内部文档，**可以直接作为 Release 资产**；GitHub 自动生成的源码归档（`tar.gz`/`zip`，含仓库全部 tracked 文件）同样可用。
+- npm 发布日目标清单：与上面的实测清单完全一致（21 项；`lib/ocr/**` 为 7 个文件：`engine.cjs`/`engine-impl.cjs`/`worker.cjs` + 2 个 WASM core + 2 个语言包）。`files` 已是最终形态，npm 日只需叠加 §3 diff 里剩余的 `engines`/`publishConfig`/`description`/`exports` 项。
+- 体积（实测，`files` 精确化后）：`client.pdf.js` 1,735,431 B + `lib/pdf.worker.mjs` 2,395,538 B + `lib/host.js` 1,058,698 B + `client.js` 32,407 B ≈ 5.0 MiB（未压缩）；`lib/ocr/**` 另 11,281,627 B ≈ 10.8 MiB；tarball 实测 8,227,726 B ≈ 7.85 MiB。
 - 如要检查真实 tarball（会写文件）：`pnpm pack` 后 `tar -tzf dsh-paper-reader-0.1.0.tgz`，检查完删除、不要提交（`.gitignore` 目前未忽略 `*.tgz`）。
 
 ---
@@ -469,11 +471,12 @@ git push origin v0.1.0
 
 1. **GitHub 仓库人工步骤**：给 repo 加 `dsh-plugin` topic、仓库满 1 天、打 tag/Release、fork + PR 到 awesome-dsh-plugin（§16）；GitHub 用户名已确定为 `beiwei91`。
 2. **运行时验证**（§14）是否已完成。
-3. **Release 资产策略**（§5）：只发 tag（推荐）、源码归档，还是调整 `files` 后附 tarball。
+3. **Release 资产策略**（§5）：只发 tag（推荐）、源码归档，还是附 `pnpm pack` tarball（`files` 已精确化，tarball 已含 `THIRD-PARTY-LICENSES.md` 且不含内部文档，可直接用）。
 4. **图标/示意图授权**：确认 `icon.svg`、`docs/preview.svg` 可再分发。
 5. **版权署名**：`LICENSE` 当前写 “dsh-paper-reader contributors”；是否换成个人/组织名。
 6. **社区上架**：是否向 awesome-dsh-plugin 提 git-only entry、是否自建 format-1 index（§10）。
 7. **未来 npm**：是否注册免费账号走 §12；若做，发布日决定最终 npm 名（scoped `@beiwei91/dsh-paper-reader` 或另选 free 名）——unscoped `dsh-paper-reader` 已被占用。
+8. **内部文档是否移出仓库**：`docs/PUBLISHING.md`、`docs/README.draft.md`、`docs/OCR-VERIFICATION.md` 已不再进 npm 包，但仍留在仓库里（GitHub 源码归档会包含）。是否把 `docs/OCR-VERIFICATION.md` 等内部文档移出仓库或删除。
 
 ---
 
@@ -565,7 +568,7 @@ agent 用 `plugin_manager` → `install_bundle`，target 填同一 spec。
 
 ## 17. 本次核对用到的证据
 
-- `pnpm pack --dry-run`（核对时为 15 文件；改名 + OCR 后为 23 文件，内部 docs 会进包、`THIRD-PARTY-LICENSES.md` 未进包——见 §5）。
+- `pnpm pack --dry-run`（核对时为 15 文件；改名 + OCR 后为 23 文件，内部 docs 会进包、`THIRD-PARTY-LICENSES.md` 未进包；`files` 精确化后为 **21 文件**，内部 docs 已不进包、`THIRD-PARTY-LICENSES.md` 已进包，真实 tarball 8,227,726 B ≈ 7.85 MiB——见 §5）。
 - `pnpm typecheck`（通过）。
 - `pnpm view dsh-paper-reader --json --registry https://registry.npmjs.org/`（**已被占用**，v1.5.0，另一项目 rantz）。
 - `pnpm view paper-reader version --registry https://registry.npmjs.org/` → 404（2026-11-14；仅作未来 npm 备选名记录，本轮不使用）。
