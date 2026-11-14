@@ -80,7 +80,8 @@ export function createTools(current: ReadonlyMap<string, CurrentPaper>): ToolDef
         const { paper, text } = await load(exec)
         const annotations = await readJson<{ highlights?: unknown[] }>(annotationPath(paper.key))
         const highlights = Array.isArray(annotations?.highlights) ? annotations.highlights.length : 0
-        return [`key: ${paper.key}`, describe(text), `已存高亮: ${highlights}`].join('\n')
+        const described = text.title === '' && paper.title !== '' ? { ...text, title: paper.title } : text
+        return [`key: ${paper.key}`, describe(described), `已存高亮: ${highlights}`].join('\n')
       },
     },
     {

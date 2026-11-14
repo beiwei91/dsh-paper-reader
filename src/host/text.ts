@@ -5,8 +5,12 @@
  * runtime dependency in the profile. Text is extracted once per paper and
  * cached beside the bytes, because a 300-page paper costs seconds to walk.
  */
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { paperPaths, readBytes, readJson, writeJson } from './store.ts'
+
+// The bundled artifact lives in lib/, and the worker ships beside it: PDF.js's
+// fake worker in Node imports this file URL instead of spawning a real worker.
+GlobalWorkerOptions.workerSrc = new URL('./pdf.worker.mjs', import.meta.url).href
 
 export interface OutlineEntry {
   readonly title: string

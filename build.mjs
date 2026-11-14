@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -101,6 +101,11 @@ runEsbuild([
   '--log-level=warning',
 ])
 console.log(`lib/host.js written (${((await readFile(HOST_OUT)).length / 1024).toFixed(1)} KiB)`)
+await copyFile(
+  fileURLToPath(new URL('node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url)),
+  fileURLToPath(new URL('lib/pdf.worker.mjs', import.meta.url)),
+)
+console.log('lib/pdf.worker.mjs copied')
 
 // 2. The always-loaded half.
 const MAIN_OUT = `${OUT_DIR}client.cjs`

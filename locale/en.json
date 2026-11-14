@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "Paper Reader",
-    "description": "Adds a Papers tab to the right sidebar. Phase 1 ships the skeleton only: the tab opens, while the reading layer (PDF rendering, outline, search, highlights and notes) and the agent tools arrive in later phases."
+    "description": "A Papers tab in the right sidebar for reading PDF papers: open local files by drag-and-drop or absolute path, arXiv links/ids, or arXiv keyword search; continuous scrolling, outline jumps, in-document search and remembered position; multi-colour highlights with margin notes saved per paper; quote a selection into the conversation, or ask the agent to explain or translate it; the agent reads the current paper through the read-only paper_info, paper_outline, paper_read and paper_search tools.",
+    "detail": "docs/DETAIL.md"
   }
 }

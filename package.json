@@ -17,10 +17,12 @@
   },
   "files": [
     "lib/host.js",
+    "lib/pdf.worker.mjs",
     "client.js",
     "client.*.js",
     "cordis.patch.yml",
     "locale/*.json",
+    "docs",
     "icon.svg"
   ],
   "dsh": {

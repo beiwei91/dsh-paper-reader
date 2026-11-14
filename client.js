@@ -156,6 +156,11 @@ var BODY_CSS = `
 .pr-open-btn{border:1px solid var(--dsw-alias-border-primary,rgba(0,0,0,.16));background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.05));color:inherit;border-radius:6px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
 .pr-open-btn:disabled{opacity:.5;cursor:default}
 .pr-error{font-size:12px;line-height:1.5;color:var(--dsw-alias-label-error,#cf222e);max-width:420px;word-break:break-all}
+.pr-results{width:100%;max-width:420px;max-height:38vh;overflow:auto;display:flex;flex-direction:column;gap:2px;border:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08));border-radius:8px;padding:4px}
+.pr-result{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;border:0;background:transparent;font:inherit;color:inherit;padding:5px 7px;border-radius:6px;cursor:pointer}
+.pr-result:hover{background:var(--dsw-alias-bg-hover,rgba(0,0,0,.06))}
+.pr-result-title{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-primary,#1f2328);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.pr-result-meta{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b949e)}
 .pr-drop{border:1px dashed var(--dsw-alias-border-primary,rgba(0,0,0,.2));border-radius:10px;padding:16px;max-width:420px;width:100%}
 .pr-drop[data-active="true"]{border-color:var(--dsw-focus-ring-color,#3b82f6);background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.04))}
 .pr-head{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:5px 6px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08))}
@@ -185,11 +190,17 @@ function PapersBody({ reader, t, inputActions, sessionId }) {
   const [paper, setPaper] = (0, import_react2.useState)(null);
   const [viewer, setViewer] = (0, import_react2.useState)(null);
   const [pathInput, setPathInput] = (0, import_react2.useState)("");
+  const [arxivInput, setArxivInput] = (0, import_react2.useState)("");
+  const [searchQuery, setSearchQuery] = (0, import_react2.useState)("");
+  const [searchResults, setSearchResults] = (0, import_react2.useState)(null);
+  const [searching, setSearching] = (0, import_react2.useState)(false);
   const [error, setError] = (0, import_react2.useState)(null);
   const [busy, setBusy] = (0, import_react2.useState)(false);
   const [dropping, setDropping] = (0, import_react2.useState)(false);
   const alive = (0, import_react2.useRef)(true);
   const abortRef = (0, import_react2.useRef)(null);
+  const openSeq = (0, import_react2.useRef)(0);
+  const searchSeq = (0, import_react2.useRef)(0);
   const annotations = useAnnotations(paper?.storageKey ?? null);
   (0, import_react2.useEffect)(() => {
     alive.current = true;
@@ -236,6 +247,60 @@ function PapersBody({ reader, t, inputActions, sessionId }) {
       if (alive.current) setBusy(false);
     }
   }, [pathInput, reader, sessionId, t]);
+  const openArxiv = (0, import_react2.useCallback)(async (idOrUrl, knownTitle) => {
+    const input = idOrUrl.trim();
+    if (input === "") return;
+    const sequence = openSeq.current + 1;
+    openSeq.current = sequence;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/paper-reader/api/arxiv/open", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ idOrUrl: input, sessionId: sessionId ?? "" }),
+        signal: AbortSignal.timeout(9e4)
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(response.status === 413 ? t("errorTooLarge") : detail.error ?? t("arxivOpenFailed"));
+      }
+      const opened = await response.json();
+      if (typeof opened.key !== "string" || opened.key === "") throw new Error(t("arxivOpenFailed"));
+      const bytesResponse = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(opened.key)}`, {
+        signal: AbortSignal.timeout(6e4)
+      });
+      if (!bytesResponse.ok) throw new Error(t("arxivOpenFailed"));
+      const bytes = new Uint8Array(await bytesResponse.arrayBuffer());
+      if (!alive.current || sequence !== openSeq.current) return;
+      setPaper({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true });
+    } catch (reason) {
+      if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      if (alive.current && sequence === openSeq.current) setBusy(false);
+    }
+  }, [sessionId, t]);
+  const runSearch = (0, import_react2.useCallback)(async () => {
+    const query = searchQuery.trim();
+    if (query === "") return;
+    const sequence = searchSeq.current + 1;
+    searchSeq.current = sequence;
+    setSearching(true);
+    setError(null);
+    try {
+      const response = await fetch(`/paper-reader/api/arxiv/search?q=${encodeURIComponent(query)}&max=10`, {
+        signal: AbortSignal.timeout(6e4)
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+      if (!alive.current || sequence !== searchSeq.current) return;
+      setSearchResults(Array.isArray(result.entries) ? result.entries : []);
+    } catch (reason) {
+      if (alive.current && sequence === searchSeq.current) setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      if (alive.current && sequence === searchSeq.current) setSearching(false);
+    }
+  }, [searchQuery]);
   const openFile = (0, import_react2.useCallback)(async (file) => {
     if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
       setError(t("errorOpen"));
@@ -269,9 +334,13 @@ function PapersBody({ reader, t, inputActions, sessionId }) {
     setPaper(null);
     setError(null);
     setPathInput("");
-  }, []);
+    setSearchResults(null);
+    if (sessionId !== void 0 && sessionId !== "") {
+      void fetch(`/paper-reader/api/current?session=${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => void 0);
+    }
+  }, [sessionId]);
   (0, import_react2.useEffect)(() => {
-    if (paper === null || sessionId === void 0 || sessionId === "") return;
+    if (paper === null || sessionId === void 0 || sessionId === "" || paper.hostStored === true) return;
     const controller = new AbortController();
     void (async () => {
       try {
@@ -366,6 +435,61 @@ function PapersBody({ reader, t, inputActions, sessionId }) {
         { className: "pr-drop", "data-active": dropping ? "true" : "false" },
         (0, import_react2.createElement)("div", { className: "pr-empty-foot" }, t("dropHint"))
       ),
+      (0, import_react2.createElement)(
+        "form",
+        {
+          className: "pr-form",
+          onSubmit: (event) => {
+            event.preventDefault();
+            void openArxiv(arxivInput);
+          }
+        },
+        (0, import_react2.createElement)("input", {
+          className: "pr-input",
+          value: arxivInput,
+          placeholder: t("arxivIdPlaceholder"),
+          spellCheck: false,
+          onChange: (event) => setArxivInput(event.currentTarget.value)
+        }),
+        (0, import_react2.createElement)("button", { type: "submit", className: "pr-open-btn", disabled: busy }, t("arxivOpen"))
+      ),
+      (0, import_react2.createElement)(
+        "form",
+        {
+          className: "pr-form",
+          onSubmit: (event) => {
+            event.preventDefault();
+            void runSearch();
+          }
+        },
+        (0, import_react2.createElement)("input", {
+          className: "pr-input",
+          value: searchQuery,
+          placeholder: t("arxivSearchPlaceholder"),
+          spellCheck: false,
+          onChange: (event) => setSearchQuery(event.currentTarget.value)
+        }),
+        (0, import_react2.createElement)("button", { type: "submit", className: "pr-open-btn", disabled: searching }, t("arxivSearch"))
+      ),
+      searching && (0, import_react2.createElement)("div", { className: "pr-empty-foot" }, t("arxivSearching")),
+      searchResults !== null && searchResults.length === 0 && !searching && (0, import_react2.createElement)("div", { className: "pr-empty-foot" }, t("arxivNoResult")),
+      searchResults !== null && searchResults.length > 0 && (0, import_react2.createElement)(
+        "div",
+        { className: "pr-results" },
+        ...searchResults.map((hit) => (0, import_react2.createElement)(
+          "button",
+          {
+            key: hit.id,
+            type: "button",
+            className: "pr-result",
+            title: hit.summary,
+            disabled: busy,
+            onClick: () => void openArxiv(hit.id, hit.title)
+          },
+          (0, import_react2.createElement)("span", { className: "pr-result-title" }, hit.title),
+          (0, import_react2.createElement)("span", { className: "pr-result-meta" }, `arXiv:${hit.id}${hit.published === "" ? "" : ` \xB7 ${hit.published}`}`)
+        ))
+      ),
       error !== null && (0, import_react2.createElement)("div", { className: "pr-error" }, error)
     )
   );
@@ -410,7 +534,14 @@ var zh = {
   noteSave: "\u4FDD\u5B58",
   noteDelete: "\u5220\u9664",
   explainPrompt: "\u8BF7\u89E3\u91CA\u8FD9\u6BB5\u3002",
-  translatePrompt: "\u8BF7\u628A\u8FD9\u6BB5\u7FFB\u8BD1\u6210\u4E2D\u6587\u3002"
+  translatePrompt: "\u8BF7\u628A\u8FD9\u6BB5\u7FFB\u8BD1\u6210\u4E2D\u6587\u3002",
+  arxivIdPlaceholder: "arXiv \u94FE\u63A5\u6216 ID\uFF0C\u5982 1706.03762",
+  arxivOpen: "\u6253\u5F00",
+  arxivSearchPlaceholder: "\u641C\u7D22 arXiv \u8BBA\u6587",
+  arxivSearch: "\u641C\u7D22",
+  arxivSearching: "\u6B63\u5728\u641C\u7D22 arXiv\u2026",
+  arxivNoResult: "\u6CA1\u6709\u627E\u5230\u76F8\u5173\u8BBA\u6587",
+  arxivOpenFailed: "arXiv \u8BBA\u6587\u6253\u5F00\u5931\u8D25"
 };
 var en = {
   title: "Papers",
@@ -449,7 +580,14 @@ var en = {
   noteSave: "Save",
   noteDelete: "Delete",
   explainPrompt: "Explain this passage.",
-  translatePrompt: "Translate this passage into Chinese."
+  translatePrompt: "Translate this passage into Chinese.",
+  arxivIdPlaceholder: "arXiv link or id, e.g. 1706.03762",
+  arxivOpen: "Open",
+  arxivSearchPlaceholder: "Search arXiv",
+  arxivSearch: "Search",
+  arxivSearching: "Searching arXiv\u2026",
+  arxivNoResult: "No matching papers",
+  arxivOpenFailed: "Could not open that arXiv paper"
 };
 function registerPapersLocale(ctx) {
   const disposeZh = ctx.locale.register(LOCALE_NS, "zh", zh);

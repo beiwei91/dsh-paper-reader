@@ -53,6 +53,13 @@ export type PaperReaderLocaleKey =
   | 'noteDelete'
   | 'explainPrompt'
   | 'translatePrompt'
+  | 'arxivIdPlaceholder'
+  | 'arxivOpen'
+  | 'arxivSearchPlaceholder'
+  | 'arxivSearch'
+  | 'arxivSearching'
+  | 'arxivNoResult'
+  | 'arxivOpenFailed'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {

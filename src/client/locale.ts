@@ -42,6 +42,13 @@ const zh: LocaleDictOf<'paperReader'> = {
   noteDelete: '删除',
   explainPrompt: '请解释这段。',
   translatePrompt: '请把这段翻译成中文。',
+  arxivIdPlaceholder: 'arXiv 链接或 ID，如 1706.03762',
+  arxivOpen: '打开',
+  arxivSearchPlaceholder: '搜索 arXiv 论文',
+  arxivSearch: '搜索',
+  arxivSearching: '正在搜索 arXiv…',
+  arxivNoResult: '没有找到相关论文',
+  arxivOpenFailed: 'arXiv 论文打开失败',
 }
 
 const en: LocaleDictOf<'paperReader'> = {
@@ -82,6 +89,13 @@ const en: LocaleDictOf<'paperReader'> = {
   noteDelete: 'Delete',
   explainPrompt: 'Explain this passage.',
   translatePrompt: 'Translate this passage into Chinese.',
+  arxivIdPlaceholder: 'arXiv link or id, e.g. 1706.03762',
+  arxivOpen: 'Open',
+  arxivSearchPlaceholder: 'Search arXiv',
+  arxivSearch: 'Search',
+  arxivSearching: 'Searching arXiv…',
+  arxivNoResult: 'No matching papers',
+  arxivOpenFailed: 'Could not open that arXiv paper',
 }
 
 /** Register this plugin's dictionaries; the returned disposer lives in one effect. */

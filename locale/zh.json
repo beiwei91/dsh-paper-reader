@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "论文阅读器",
-    "description": "在右侧栏新增「论文」标签页。阶段 1 只交付骨架：标签页可打开，阅读层（PDF 渲染、目录、搜索、高亮边注）与 agent 工具随后逐阶段接入。"
+    "description": "在右侧栏新增「论文」标签页读 PDF 论文：本地文件（拖拽或绝对路径）、arXiv 链接/ID 与 arXiv 关键词搜索；连续滚动、目录跳转、页内搜索、记忆阅读位置；多色高亮与边注可按论文保存；选中原文可引用到对话、让 agent 解释或翻译；agent 通过 paper_info / paper_outline / paper_read / paper_search 只读当前论文。",
+    "detail": "docs/DETAIL.md"
   }
 }

@@ -10,7 +10,8 @@
  * Storage lives under the DSH home, never in the user's workspace.
  */
 import { unlink } from 'node:fs/promises'
-import { annotationPath, paperPaths, readJson, writeBytes, writeJson } from './store.ts'
+import { ArxivRequestError, fetchArxivPaper, searchArxiv } from './arxiv.ts'
+import { annotationPath, paperPaths, readBytes, readJson, writeBytes, writeJson } from './store.ts'
 import { createTools, type CurrentPaper } from './tools.ts'
 
 interface HostContext {
@@ -32,6 +33,7 @@ interface IncomingMessageLike {
   on(event: 'data', listener: (chunk: Uint8Array) => void): void
   on(event: 'end', listener: () => void): void
   on(event: 'error', listener: (error: Error) => void): void
+  on(event: 'close', listener: () => void): void
   resume(): void
   destroy(): void
 }
@@ -125,6 +127,10 @@ function readBody(request: IncomingMessageLike, limit: number): Promise<Uint8Arr
       resolve(body)
     })
     request.on('error', error => fail(error))
+    // A client that walks away mid-body must not leave this promise pending.
+    request.on('close', () => {
+      if (!settled) fail(new Error('request closed'))
+    })
   })
 }
 
@@ -260,13 +266,78 @@ export function apply(ctx: HostContext): void {
         }
 
         if (request.method === 'DELETE' && url.pathname === `${ROUTE}/current`) {
+          // Clearing the open-paper pointer is harmless state on a loopback-gated
+          // route, and browsers do not send Origin on every same-origin DELETE.
+          const sessionId = url.searchParams.get('session') ?? ''
+          current.delete(sessionId)
+          sendJson(response, 200, { ok: true })
+          return
+        }
+
+        if (request.method === 'GET' && url.pathname === `${ROUTE}/paper/bytes`) {
+          const key = url.searchParams.get('key') ?? ''
+          if (key === '') {
+            sendJson(response, 400, { error: 'missing-key' })
+            return
+          }
+          const bytes = await readBytes(paperPaths(key).pdf)
+          if (bytes === null) {
+            sendJson(response, 404, { error: 'no-bytes' })
+            return
+          }
+          response.writeHead(200, {
+            'content-type': 'application/pdf',
+            'content-length': bytes.length,
+            'cache-control': 'no-store',
+          })
+          response.end(bytes)
+          return
+        }
+
+        if (request.method === 'GET' && url.pathname === `${ROUTE}/arxiv/search`) {
+          const query = url.searchParams.get('q') ?? ''
+          if (query.trim() === '') {
+            sendJson(response, 400, { error: 'missing-query' })
+            return
+          }
+          const max = Number(url.searchParams.get('max') ?? '10')
+          try {
+            const entries = await searchArxiv(query, Number.isFinite(max) ? max : 10)
+            sendJson(response, 200, { entries })
+          } catch (error) {
+            sendJson(response, 502, { error: error instanceof Error ? error.message : 'search failed' })
+          }
+          return
+        }
+
+        if (request.method === 'POST' && url.pathname === `${ROUTE}/arxiv/open`) {
           if (!sameOrigin(request.headers)) {
             sendJson(response, 403, { error: 'bad-origin' })
             return
           }
-          const sessionId = url.searchParams.get('session') ?? ''
-          current.delete(sessionId)
-          sendJson(response, 200, { ok: true })
+          const body = parseJsonBody(await readBody(request, JSON_BODY_LIMIT)) as {
+            idOrUrl?: unknown
+            sessionId?: unknown
+          }
+          const idOrUrl = typeof body.idOrUrl === 'string' ? body.idOrUrl : ''
+          if (idOrUrl.trim() === '') {
+            sendJson(response, 400, { error: 'missing-id' })
+            return
+          }
+          try {
+            const paper = await fetchArxivPaper(idOrUrl)
+            // Reopening the same id replaces the bytes; the text cache must go with them.
+            await unlink(paperPaths(paper.key).text).catch(() => undefined)
+            const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+            if (sessionId !== '') current.set(sessionId, { key: paper.key, title: paper.title })
+            sendJson(response, 200, paper)
+          } catch (error) {
+            if (error instanceof ArxivRequestError) {
+              sendJson(response, error.status, { error: error.message })
+              return
+            }
+            sendJson(response, 502, { error: error instanceof Error ? error.message : 'fetch failed' })
+          }
           return
         }
 

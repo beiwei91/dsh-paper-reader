@@ -5,6 +5,15 @@ import { BODY_CSS } from './pdf/styles.ts'
 import type { PapersBodyProps, PdfChunkModule, PdfViewerProps } from './contract.ts'
 import type { PaperReaderLocaleKey } from './types.ts'
 
+/** One arXiv search hit, as the Host's arXiv route returns it. */
+interface ArxivHit {
+  readonly id: string
+  readonly title: string
+  readonly summary: string
+  readonly published: string
+  readonly authors: readonly string[]
+}
+
 /** How a failure the Host declares turns into a user-facing line. */
 function errorLine(code: string | undefined, t: (key: PaperReaderLocaleKey) => string): string {
   if (code === 'workspace-file/too-large') return t('errorTooLarge')
@@ -22,6 +31,8 @@ interface OpenPaper {
   readonly name: string
   readonly storageKey: string
   readonly bytes: Uint8Array<ArrayBuffer>
+  /** The Host already stored these bytes (arXiv open), so the upload can be skipped. */
+  readonly hostStored?: boolean
 }
 
 /** The chunk is fetched once per Client module, however many tabs open; a failed fetch may retry. */
@@ -39,18 +50,24 @@ const MAX_FILE_BYTES = 32 * 1024 * 1024
 
 /**
  * The tab body: an empty state that opens a paper (absolute path through the
- * Host, or a dropped file read in the page), then the lazily loaded reader with
- * its annotation store and the conversation actions.
+ * Host, a dropped file read in the page, or arXiv), then the lazily loaded
+ * reader with its annotation store and the conversation actions.
  */
 export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyProps): ReturnType<typeof h> {
   const [paper, setPaper] = useState<OpenPaper | null>(null)
   const [viewer, setViewer] = useState<ComponentType<PdfViewerProps> | null>(null)
   const [pathInput, setPathInput] = useState('')
+  const [arxivInput, setArxivInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<ArxivHit[] | null>(null)
+  const [searching, setSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [dropping, setDropping] = useState(false)
   const alive = useRef(true)
   const abortRef = useRef<AbortController | null>(null)
+  const openSeq = useRef(0)
+  const searchSeq = useRef(0)
   const annotations = useAnnotations(paper?.storageKey ?? null)
 
   useEffect(() => {
@@ -99,6 +116,63 @@ export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyPro
     }
   }, [pathInput, reader, sessionId, t])
 
+  const openArxiv = useCallback(async (idOrUrl: string, knownTitle?: string): Promise<void> => {
+    const input = idOrUrl.trim()
+    if (input === '') return
+    const sequence = openSeq.current + 1
+    openSeq.current = sequence
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await fetch('/paper-reader/api/arxiv/open', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idOrUrl: input, sessionId: sessionId ?? '' }),
+        signal: AbortSignal.timeout(90_000),
+      })
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { error?: string }
+        throw new Error(response.status === 413 ? t('errorTooLarge') : detail.error ?? t('arxivOpenFailed'))
+      }
+      const opened = (await response.json()) as { key?: string; title?: string; id?: string }
+      if (typeof opened.key !== 'string' || opened.key === '') throw new Error(t('arxivOpenFailed'))
+      const bytesResponse = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(opened.key)}`, {
+        signal: AbortSignal.timeout(60_000),
+      })
+      if (!bytesResponse.ok) throw new Error(t('arxivOpenFailed'))
+      const bytes = new Uint8Array(await bytesResponse.arrayBuffer())
+      // A slower, earlier open must never replace the paper the user just asked for.
+      if (!alive.current || sequence !== openSeq.current) return
+      setPaper({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true })
+    } catch (reason) {
+      if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      if (alive.current && sequence === openSeq.current) setBusy(false)
+    }
+  }, [sessionId, t])
+
+  const runSearch = useCallback(async (): Promise<void> => {
+    const query = searchQuery.trim()
+    if (query === '') return
+    const sequence = searchSeq.current + 1
+    searchSeq.current = sequence
+    setSearching(true)
+    setError(null)
+    try {
+      const response = await fetch(`/paper-reader/api/arxiv/search?q=${encodeURIComponent(query)}&max=10`, {
+        signal: AbortSignal.timeout(60_000),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const result = (await response.json()) as { entries?: ArxivHit[] }
+      if (!alive.current || sequence !== searchSeq.current) return
+      setSearchResults(Array.isArray(result.entries) ? result.entries : [])
+    } catch (reason) {
+      if (alive.current && sequence === searchSeq.current) setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      if (alive.current && sequence === searchSeq.current) setSearching(false)
+    }
+  }, [searchQuery])
+
   const openFile = useCallback(async (file: File): Promise<void> => {
     if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
       setError(t('errorOpen'))
@@ -136,12 +210,18 @@ export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyPro
     setPaper(null)
     setError(null)
     setPathInput('')
-  }, [])
+    setSearchResults(null)
+    if (sessionId !== undefined && sessionId !== '') {
+      void fetch(`/paper-reader/api/current?session=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+        .catch(() => undefined)
+    }
+  }, [sessionId])
 
   // The Host needs the bytes to answer the agent's paper_* tools; a failure
-  // here only costs those tools, never the reading experience.
+  // here only costs those tools, never the reading experience. arXiv opens are
+  // already stored by the Host, so they must not upload the bytes twice.
   useEffect(() => {
-    if (paper === null || sessionId === undefined || sessionId === '') return
+    if (paper === null || sessionId === undefined || sessionId === '' || paper.hostStored === true) return
     const controller = new AbortController()
     void (async () => {
       try {
@@ -227,6 +307,47 @@ export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyPro
       ),
       h('div', { className: 'pr-drop', 'data-active': dropping ? 'true' : 'false' },
         h('div', { className: 'pr-empty-foot' }, t('dropHint')),
+      ),
+      h('form', {
+        className: 'pr-form',
+        onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); void openArxiv(arxivInput) },
+      },
+        h('input', {
+          className: 'pr-input',
+          value: arxivInput,
+          placeholder: t('arxivIdPlaceholder'),
+          spellCheck: false,
+          onChange: (event: { currentTarget: { value: string } }) => setArxivInput(event.currentTarget.value),
+        }),
+        h('button', { type: 'submit', className: 'pr-open-btn', disabled: busy }, t('arxivOpen')),
+      ),
+      h('form', {
+        className: 'pr-form',
+        onSubmit: (event: { preventDefault(): void }) => { event.preventDefault(); void runSearch() },
+      },
+        h('input', {
+          className: 'pr-input',
+          value: searchQuery,
+          placeholder: t('arxivSearchPlaceholder'),
+          spellCheck: false,
+          onChange: (event: { currentTarget: { value: string } }) => setSearchQuery(event.currentTarget.value),
+        }),
+        h('button', { type: 'submit', className: 'pr-open-btn', disabled: searching }, t('arxivSearch')),
+      ),
+      searching && h('div', { className: 'pr-empty-foot' }, t('arxivSearching')),
+      searchResults !== null && searchResults.length === 0 && !searching && h('div', { className: 'pr-empty-foot' }, t('arxivNoResult')),
+      searchResults !== null && searchResults.length > 0 && h('div', { className: 'pr-results' },
+        ...searchResults.map(hit => h('button', {
+          key: hit.id,
+          type: 'button',
+          className: 'pr-result',
+          title: hit.summary,
+          disabled: busy,
+          onClick: () => void openArxiv(hit.id, hit.title),
+        },
+          h('span', { className: 'pr-result-title' }, hit.title),
+          h('span', { className: 'pr-result-meta' }, `arXiv:${hit.id}${hit.published === '' ? '' : ` · ${hit.published}`}`),
+        )),
       ),
       error !== null && h('div', { className: 'pr-error' }, error),
     ),
