@@ -615,7 +615,10 @@ function apply(ctx) {
     id: TAB_ID,
     kind: PAPER_KIND,
     multiple: true,
-    keepMounted: true,
+    // Hidden tabs unmount: a mounted viewer keeps a PDF worker, a document and
+    // its canvas bitmaps alive, which makes many open tabs fight for memory.
+    // The reading position survives in localStorage, so reopening restores it.
+    keepMounted: false,
     title: () => t("title"),
     guide: [{
       id: "papers",

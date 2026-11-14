@@ -5,7 +5,7 @@
  * under the same artifact revision.
  */
 import * as pdfjs from 'pdfjs-dist'
-import { createElement as h, useCallback, useEffect, useRef, useState } from 'react'
+import { createElement as h, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import workerSource from '../../../.build/pdf-worker.txt'
 import type { Highlight, HighlightColor } from '../annotations.ts'
 import type { PdfViewerProps } from '../contract.ts'
@@ -65,10 +65,24 @@ const DEFAULT_PAGE: PageSize = { w: 612, h: 792 }
 const MAX_ZOOM = 4
 const MIN_ZOOM = 0.25
 const RENDER_MARGIN = 1
+const PREFETCH_AHEAD = 2
+const RENDER_DELAY_MS = 120
+const DPR_CAP = 1.5
 const MAX_CANVAS_DIM = 16384
 const MAX_CANVAS_AREA = 16777216
 const MAX_HITS = 60
 const POSITION_PREFIX = 'dsh.paper-reader.pos.'
+
+/** Let the browser paint before a text layer re-lays the page out. */
+function idle(): Promise<void> {
+  return new Promise(resolve => {
+    const ric = (window as unknown as {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+    }).requestIdleCallback
+    if (ric !== undefined) ric(() => resolve(), { timeout: 250 })
+    else window.setTimeout(resolve, 16)
+  })
+}
 const COLORS: readonly HighlightColor[] = ['yellow', 'green', 'blue', 'pink']
 
 let workerBlobUrl: string | null = null
@@ -117,7 +131,7 @@ function clampZoom(scale: number): number {
 
 /** The scale that keeps a page inside the browser's canvas limits. */
 function canvasDpr(viewport: PdfViewport): number {
-  let dpr = Math.min(2, window.devicePixelRatio || 1)
+  let dpr = Math.min(DPR_CAP, window.devicePixelRatio || 1)
   while (
     dpr > 0.2 &&
     (viewport.width * dpr > MAX_CANVAS_DIM ||
@@ -216,6 +230,11 @@ export function PdfViewer({
   const currentPageRef = useRef(1)
   const scaleRef = useRef(1)
   const searchVersion = useRef(0)
+  const offsetsRef = useRef<number[]>([])
+  const pageSizeRef = useRef<PageSize[]>([])
+  const scrollRaf = useRef<number | null>(null)
+  const measureRaf = useRef<number | null>(null)
+  const renderTimer = useRef<number | null>(null)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [failure, setFailure] = useState('')
@@ -248,6 +267,19 @@ export function PdfViewer({
   const cancelJob = useCallback((pageNumber: number): void => {
     jobs.current.get(pageNumber)?.cancel()
     jobs.current.delete(pageNumber)
+  }, [])
+
+  /** Page tops in scroll-container coordinates, so scrolling never reads layout. */
+  const measureOffsets = useCallback((): void => {
+    if (measureRaf.current !== null) return
+    measureRaf.current = window.requestAnimationFrame(() => {
+      measureRaf.current = null
+      const next: number[] = []
+      for (let index = 0; index < pageRefs.current.length; index += 1) {
+        next[index] = pageRefs.current[index]?.offsetTop ?? 0
+      }
+      offsetsRef.current = next
+    })
   }, [])
 
   const renderPage = useCallback(async (pageNumber: number): Promise<void> => {
@@ -290,6 +322,19 @@ export function PdfViewer({
       await renderTask.promise
       renderTask = null
       if (!isCurrent()) return
+      // Size the page wrapper imperatively: a state update here would re-render
+      // the whole page list on every rendered page.
+      const wrapper = pageRefs.current[pageNumber - 1]
+      if (wrapper !== null && wrapper !== undefined) {
+        wrapper.style.width = `${viewport.width}px`
+        wrapper.style.height = `${viewport.height}px`
+      }
+      pageSizeRef.current[pageNumber - 1] = { w: viewport.width / scale, h: viewport.height / scale }
+      measureOffsets()
+      // The canvas is what the reader sees; the text layer is only needed for
+      // selection and search marks, so it waits for an idle frame.
+      await idle()
+      if (!isCurrent()) return
       textEl.replaceChildren()
       textEl.style.width = `${viewport.width}px`
       textEl.style.height = `${viewport.height}px`
@@ -305,11 +350,7 @@ export function PdfViewer({
       textCache.current.set(pageNumber, content.items.map(item => ('str' in item ? item.str : '')).join(' '))
       markSpans(textEl, highlightRef.current)
       paintHighlights(textEl, pageNumber, highlightsRef.current)
-      setSizes(previous => {
-        const next = previous.slice()
-        next[pageNumber - 1] = { w: viewport.width / scale, h: viewport.height / scale }
-        return next
-      })
+      measureOffsets()
       void page.cleanup()
     } catch (error) {
       if (isCurrent()) {
@@ -390,26 +431,55 @@ export function PdfViewer({
       const scroller = scrollRef.current
       const target = pageRefs.current[restored.page - 1]
       if (scroller !== null && target !== null && target !== undefined) scroller.scrollTop = target.offsetTop
+      measureOffsets()
     })
-  }, [status])
+  }, [measureOffsets, status])
 
-  // Re-render the pages around the reader whenever the window or zoom changes.
+  // Page tops change with zoom and with each finished render.
+  useEffect(() => {
+    if (status !== 'ready') return
+    measureOffsets()
+  }, [measureOffsets, numPages, scale, status])
+
+  // Re-render the pages around the reader once scrolling settles. Waiting for a
+  // pause keeps fast scrolling from cancelling and restarting renders.
   useEffect(() => {
     if (status !== 'ready') return
     let cancelled = false
     const from = Math.max(1, currentPage - RENDER_MARGIN)
-    const to = Math.min(numPages, currentPage + RENDER_MARGIN)
-    void (async () => {
-      for (let page = from; page <= to && !cancelled; page += 1) await renderPage(page)
-    })()
+    const to = Math.min(numPages, currentPage + PREFETCH_AHEAD)
+    if (renderTimer.current !== null) window.clearTimeout(renderTimer.current)
+    renderTimer.current = window.setTimeout(() => {
+      renderTimer.current = null
+      void (async () => {
+        // Release far-away bitmaps: a long paper must not keep every canvas alive.
+        for (let page = 1; page <= numPages; page += 1) {
+          if (page >= from - 2 && page <= to + 2) continue
+          const canvas = canvasRefs.current[page - 1]
+          if (canvas !== null && canvas !== undefined && canvas.width > 1) {
+            canvas.width = 0
+            canvas.height = 0
+            jobs.current.delete(page)
+          }
+        }
+        for (let page = from; page <= to && !cancelled; page += 1) await renderPage(page)
+      })()
+    }, RENDER_DELAY_MS)
     return () => {
       cancelled = true
+      if (renderTimer.current !== null) {
+        window.clearTimeout(renderTimer.current)
+        renderTimer.current = null
+      }
     }
   }, [status, currentPage, numPages, renderPage])
 
   // Persist the position on the way out, including the last pending scroll.
   useEffect(() => () => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+    if (scrollRaf.current !== null) window.cancelAnimationFrame(scrollRaf.current)
+    if (measureRaf.current !== null) window.cancelAnimationFrame(measureRaf.current)
+    if (renderTimer.current !== null) window.clearTimeout(renderTimer.current)
     writePosition(storageKey, { page: currentPageRef.current, scale: scaleRef.current })
   }, [storageKey])
 
@@ -418,22 +488,33 @@ export function PdfViewer({
     saveTimer.current = window.setTimeout(() => writePosition(storageKey, { page, scale: scaleRef.current }), 400)
   }, [storageKey])
 
+  // One rAF per frame, and no layout reads: offsets were measured when pages moved.
   const onScroll = useCallback((): void => {
-    const scroller = scrollRef.current
-    if (scroller === null) return
-    const line = scroller.scrollTop + 80
-    const limit = Math.min(pageRefs.current.length, numPages)
-    let page = 1
-    for (let index = 0; index < limit; index += 1) {
-      const element = pageRefs.current[index]
-      if (element === null || element === undefined) continue
-      if (element.offsetTop <= line) page = index + 1
-      else break
-    }
-    if (page !== currentPageRef.current) {
-      setCurrentPage(page)
-      savePosition(page)
-    }
+    if (scrollRaf.current !== null) return
+    scrollRaf.current = window.requestAnimationFrame(() => {
+      scrollRaf.current = null
+      const scroller = scrollRef.current
+      if (scroller === null) return
+      const line = scroller.scrollTop + 80
+      const offsets = offsetsRef.current
+      const limit = Math.min(offsets.length, numPages)
+      let page = 1
+      let low = 0
+      let high = limit - 1
+      while (low <= high) {
+        const mid = (low + high) >> 1
+        if ((offsets[mid] ?? 0) <= line) {
+          page = mid + 1
+          low = mid + 1
+        } else {
+          high = mid - 1
+        }
+      }
+      if (page !== currentPageRef.current) {
+        setCurrentPage(page)
+        savePosition(page)
+      }
+    })
   }, [numPages, savePosition])
 
   const pageText = useCallback(async (pageNumber: number): Promise<string> => {
@@ -487,17 +568,16 @@ export function PdfViewer({
   const jumpTo = useCallback((page: number): void => {
     const target = Math.min(numPages, Math.max(1, page))
     setCurrentPage(target)
-    const element = pageRefs.current[target - 1]
     const scroller = scrollRef.current
-    if (element !== null && element !== undefined && scroller !== null) {
-      scroller.scrollTop = element.offsetTop
+    if (scroller !== null) {
+      scroller.scrollTop = offsetsRef.current[target - 1] ?? pageRefs.current[target - 1]?.offsetTop ?? 0
       savePosition(target)
     }
   }, [numPages, savePosition])
 
   const fitWidth = useCallback((): void => {
     const width = scrollRef.current?.clientWidth ?? 0
-    const first = sizes[0] ?? DEFAULT_PAGE
+    const first = pageSizeRef.current[0] ?? sizes[0] ?? DEFAULT_PAGE
     if (width > 40) {
       for (const page of jobs.current.keys()) cancelJob(page)
       setScale(clampZoom((width - 28) / first.w))
@@ -570,6 +650,23 @@ export function PdfViewer({
     setShowNotes(false)
   }, [jumpTo])
 
+  // The page list is rebuilt only when the document or zoom changes: a scroll
+  // tick then re-renders the toolbar and indicator alone, not every wrapper.
+  const pageElements = useMemo(() => Array.from({ length: numPages }, (_, index) => {
+    const page = index + 1
+    const size = sizes[index] ?? DEFAULT_PAGE
+    return h('div', {
+      key: page,
+      className: 'pr-page',
+      'data-page': page,
+      ref: (element: HTMLDivElement | null): void => { pageRefs.current[index] = element },
+      style: { width: `${size.w * scale}px`, height: `${size.h * scale}px` },
+    },
+      h('canvas', { className: 'pr-canvas', ref: (element: HTMLCanvasElement | null): void => { canvasRefs.current[index] = element } }),
+      h('div', { className: 'pr-text', ref: (element: HTMLDivElement | null): void => { textRefs.current[index] = element } }),
+    )
+  }), [numPages, scale, sizes])
+
   return h('div', { className: 'pr-root' },
     h('style', null, VIEWER_CSS),
     h('div', { className: 'pr-toolbar' },
@@ -637,19 +734,7 @@ export function PdfViewer({
     h('div', { className: 'pr-pages', ref: scrollRef, onScroll, onMouseUp },
       status === 'loading' && h('div', { className: 'pr-status' }, t('loading')),
       status === 'error' && h('div', { className: 'pr-status' }, failure),
-      status === 'ready' && Array.from({ length: numPages }, (_, index) => {
-        const page = index + 1
-        const size = sizes[index] ?? DEFAULT_PAGE
-        return h('div', {
-          key: page,
-          className: 'pr-page',
-          ref: (element: HTMLDivElement | null): void => { pageRefs.current[index] = element },
-          style: { width: `${size.w * scale}px`, height: `${size.h * scale}px` },
-        },
-          h('canvas', { className: 'pr-canvas', ref: (element: HTMLCanvasElement | null): void => { canvasRefs.current[index] = element } }),
-          h('div', { className: 'pr-text', ref: (element: HTMLDivElement | null): void => { textRefs.current[index] = element } }),
-        )
-      }),
+      status === 'ready' && pageElements,
     ),
     selection !== null && h('div', {
       className: 'pr-sel',
