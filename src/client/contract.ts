@@ -5,6 +5,7 @@
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type { WorkspaceByteReadOptions, WorkspaceFileBytes } from '@deepseek-ai/dsh-api-workspace-files/types'
 import type { InputActions } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { Highlight, HighlightColor } from './annotations.ts'
 import type { PaperReaderLocaleKey } from './types.ts'
@@ -34,6 +35,11 @@ export interface PapersBodyProps {
   readonly t: (key: PaperReaderLocaleKey) => string
   readonly inputActions?: InputActions
   readonly sessionId?: string
+  /**
+   * The standard tab-body hook the seat injects. `tab.id` identifies this tab
+   * occurrence, which is what makes the open paper survive an unmount.
+   */
+  readonly useTabInfo: UseSidebarRightTabInfo
 }
 
 /** The one Host read the body performs, injected so the body never names the Remote. */

@@ -48,12 +48,63 @@ function loadViewer(): Promise<PdfChunkModule> {
 /** The complete-file cap the Host applies to `readBytes`. */
 const MAX_FILE_BYTES = 32 * 1024 * 1024
 
+/** Where this tab's open paper is remembered across the body's unmount. */
+const TAB_PAPER_PREFIX = 'dsh.paper-reader.tab.'
+
+/** The durable pointer: the Host keeps the bytes, so the name is all the UI needs. */
+interface StoredPaper {
+  readonly key: string
+  readonly name: string
+  /** The session that opened it, so another session's leftover entry is never adopted. */
+  readonly sessionId?: string
+}
+
+function readTabPaper(tabId: string): StoredPaper | null {
+  try {
+    const raw = window.localStorage.getItem(TAB_PAPER_PREFIX + tabId)
+    if (raw === null) return null
+    const parsed = JSON.parse(raw) as Partial<StoredPaper>
+    if (typeof parsed.key !== 'string' || parsed.key === '') return null
+    return {
+      key: parsed.key,
+      name: typeof parsed.name === 'string' ? parsed.name : '',
+      sessionId: typeof parsed.sessionId === 'string' && parsed.sessionId !== '' ? parsed.sessionId : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeTabPaper(tabId: string, paper: StoredPaper): void {
+  try {
+    window.localStorage.setItem(TAB_PAPER_PREFIX + tabId, JSON.stringify(paper))
+  } catch {
+    // Storage can be full or disabled; restoring the paper is a convenience.
+  }
+}
+
+function clearTabPaper(tabId: string): void {
+  try {
+    window.localStorage.removeItem(TAB_PAPER_PREFIX + tabId)
+  } catch {
+    // Same as above.
+  }
+}
+
 /**
  * The tab body: an empty state that opens a paper (absolute path through the
  * Host, a dropped file read in the page, or arXiv), then the lazily loaded
  * reader with its annotation store and the conversation actions.
  */
-export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyProps): ReturnType<typeof h> {
+export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: PapersBodyProps): ReturnType<typeof h> {
+  // A hidden tab unmounts this body (see the tab type's `keepMounted: false`), so
+  // the open paper lives in the Host's bytes plus one localStorage pointer keyed
+  // by this tab occurrence, and is restored on the next mount.
+  const tabId = String(useTabInfo().tab.id)
+  const restoreTried = useRef('')
+  const [restoring, setRestoring] = useState<boolean>(() => {
+    return readTabPaper(tabId) !== null && sessionId !== undefined && sessionId !== ''
+  })
   const [paper, setPaper] = useState<OpenPaper | null>(null)
   const [viewer, setViewer] = useState<ComponentType<PdfViewerProps> | null>(null)
   const [pathInput, setPathInput] = useState('')
@@ -87,6 +138,62 @@ export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyPro
     })
     return () => { cancelled = true }
   }, [])
+
+  // One restore attempt per mount. The Host keeps every opened paper's bytes, so
+  // a hidden tab's viewer can be rebuilt from the pointer alone; a stale pointer
+  // (Host lost the bytes, or another session wrote it) becomes the empty state
+  // instead of a broken view, and is never retried in a loop.
+  useEffect(() => {
+    if (restoreTried.current === tabId) return
+    const stored = readTabPaper(tabId)
+    if (stored === null) {
+      setRestoring(false)
+      return
+    }
+    if (sessionId === undefined || sessionId === '') return
+    if (stored.sessionId !== undefined && stored.sessionId !== sessionId) {
+      clearTabPaper(tabId)
+      setRestoring(false)
+      return
+    }
+    restoreTried.current = tabId
+    setRestoring(true)
+    void (async () => {
+      try {
+        const response = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(stored.key)}`, {
+          signal: AbortSignal.timeout(60_000),
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        if (!alive.current) return
+        setPaper({ name: stored.name || stored.key, storageKey: stored.key, bytes, hostStored: true })
+        // The agent's paper_* tools answer about the session's current paper;
+        // remounting the tab must not leave them without one.
+        void fetch('/paper-reader/api/current', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId, key: stored.key, title: stored.name }),
+        }).catch(() => undefined)
+      } catch (reason) {
+        if (!alive.current) return
+        console.warn('[paper-reader] paper restore failed', reason)
+        clearTabPaper(tabId)
+        setPaper(null)
+      } finally {
+        if (alive.current) setRestoring(false)
+      }
+    })()
+  }, [sessionId, tabId])
+
+  // Remember this tab's paper while it is open; 换一篇 clears the pointer.
+  useEffect(() => {
+    if (paper === null) return
+    writeTabPaper(tabId, {
+      key: paper.storageKey,
+      name: paper.name,
+      sessionId: sessionId === undefined || sessionId === '' ? undefined : sessionId,
+    })
+  }, [paper, sessionId, tabId])
 
   const openPath = useCallback(async (): Promise<void> => {
     const path = pathInput.trim()
@@ -207,7 +314,9 @@ export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyPro
   }, [openFile])
 
   const reset = useCallback((): void => {
+    clearTabPaper(tabId)
     setPaper(null)
+    setRestoring(false)
     setError(null)
     setPathInput('')
     setSearchResults(null)
@@ -215,7 +324,7 @@ export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyPro
       void fetch(`/paper-reader/api/current?session=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
         .catch(() => undefined)
     }
-  }, [sessionId])
+  }, [sessionId, tabId])
 
   // The Host needs the bytes to answer the agent's paper_* tools; a failure
   // here only costs those tools, never the reading experience. arXiv opens are
@@ -279,6 +388,15 @@ export function PapersBody({ reader, t, inputActions, sessionId }: PapersBodyPro
           onQuote: quote,
           onAsk: ask,
         }),
+    )
+  }
+
+  // A hidden tab unmounted the viewer; while its paper comes back from the Host,
+  // keep the loading state rather than flashing the empty-paper state.
+  if (restoring) {
+    return h('div', { className: 'pr-body' },
+      h('style', null, BODY_CSS),
+      h('div', { className: 'pr-status' }, t('loading')),
     )
   }
 

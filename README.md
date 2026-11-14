@@ -52,7 +52,7 @@ paper-reader/annotations/<sha1>.json    高亮与边注
 
 ```
 src/client/index.tsx       tab 类型、body、标题、引导页入口的注册
-src/client/PapersBody.tsx  空状态（路径/拖拽/arXiv 搜索）、标注存储接线、对话动作
+src/client/PapersBody.tsx  空状态（路径/拖拽/arXiv 搜索）、按 tab 记住已打开的论文、标注存储接线、对话动作
 src/client/annotations.ts  按论文的标注 store（防抖写、离开时 flush）
 src/client/pdf/chunk.tsx   阅读层：渲染窗口、目录、全文搜索、选区工具条、笔记
 src/client/pdf/marks.ts    按“页 + 文本片段”把高亮画回重建后的文本层
@@ -72,4 +72,6 @@ src/host/{arxiv,store,text,tools}.ts  arXiv 抓取、落盘、文本抽取、四
 - 每篇论文默认用第 1 页尺寸做占位，横版页在渲染前会跳一下。
 - 高亮按“页 + 文本片段”锚定；跨页选区会被拒绝，同一段重复文本只标记第一处。
 - 论文文件被移动/改名后，本地路径类 key 的标注不会自动跟随。
+- 文本层按需构建（有高亮/搜索命中、或开始选择时才建）：在还没建层的页面上第一次拖动选择会先建层，选区工具条约一两百毫秒后才出现（选区会自动补上，不用重拖）；之后拖动即时生效。
+- 右侧栏切到别的标签再切回来时，阅读层会卸载并从 Host 重新载入同一篇论文（页面/缩放沿用记忆位置）。Host 重启且没有该论文字节时，标签重置为空状态。
 - OCR 未接入（见上）。

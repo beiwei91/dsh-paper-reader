@@ -186,7 +186,40 @@ function loadViewer() {
   return chunkPromise;
 }
 var MAX_FILE_BYTES = 32 * 1024 * 1024;
-function PapersBody({ reader, t, inputActions, sessionId }) {
+var TAB_PAPER_PREFIX = "dsh.paper-reader.tab.";
+function readTabPaper(tabId) {
+  try {
+    const raw = window.localStorage.getItem(TAB_PAPER_PREFIX + tabId);
+    if (raw === null) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.key !== "string" || parsed.key === "") return null;
+    return {
+      key: parsed.key,
+      name: typeof parsed.name === "string" ? parsed.name : "",
+      sessionId: typeof parsed.sessionId === "string" && parsed.sessionId !== "" ? parsed.sessionId : void 0
+    };
+  } catch {
+    return null;
+  }
+}
+function writeTabPaper(tabId, paper) {
+  try {
+    window.localStorage.setItem(TAB_PAPER_PREFIX + tabId, JSON.stringify(paper));
+  } catch {
+  }
+}
+function clearTabPaper(tabId) {
+  try {
+    window.localStorage.removeItem(TAB_PAPER_PREFIX + tabId);
+  } catch {
+  }
+}
+function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
+  const tabId = String(useTabInfo().tab.id);
+  const restoreTried = (0, import_react2.useRef)("");
+  const [restoring, setRestoring] = (0, import_react2.useState)(() => {
+    return readTabPaper(tabId) !== null && sessionId !== void 0 && sessionId !== "";
+  });
   const [paper, setPaper] = (0, import_react2.useState)(null);
   const [viewer, setViewer] = (0, import_react2.useState)(null);
   const [pathInput, setPathInput] = (0, import_react2.useState)("");
@@ -220,6 +253,53 @@ function PapersBody({ reader, t, inputActions, sessionId }) {
       cancelled = true;
     };
   }, []);
+  (0, import_react2.useEffect)(() => {
+    if (restoreTried.current === tabId) return;
+    const stored = readTabPaper(tabId);
+    if (stored === null) {
+      setRestoring(false);
+      return;
+    }
+    if (sessionId === void 0 || sessionId === "") return;
+    if (stored.sessionId !== void 0 && stored.sessionId !== sessionId) {
+      clearTabPaper(tabId);
+      setRestoring(false);
+      return;
+    }
+    restoreTried.current = tabId;
+    setRestoring(true);
+    void (async () => {
+      try {
+        const response = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(stored.key)}`, {
+          signal: AbortSignal.timeout(6e4)
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (!alive.current) return;
+        setPaper({ name: stored.name || stored.key, storageKey: stored.key, bytes, hostStored: true });
+        void fetch("/paper-reader/api/current", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, key: stored.key, title: stored.name })
+        }).catch(() => void 0);
+      } catch (reason) {
+        if (!alive.current) return;
+        console.warn("[paper-reader] paper restore failed", reason);
+        clearTabPaper(tabId);
+        setPaper(null);
+      } finally {
+        if (alive.current) setRestoring(false);
+      }
+    })();
+  }, [sessionId, tabId]);
+  (0, import_react2.useEffect)(() => {
+    if (paper === null) return;
+    writeTabPaper(tabId, {
+      key: paper.storageKey,
+      name: paper.name,
+      sessionId: sessionId === void 0 || sessionId === "" ? void 0 : sessionId
+    });
+  }, [paper, sessionId, tabId]);
   const openPath = (0, import_react2.useCallback)(async () => {
     const path = pathInput.trim();
     if (path === "") return;
@@ -331,14 +411,16 @@ function PapersBody({ reader, t, inputActions, sessionId }) {
     if (file !== void 0) void openFile(file);
   }, [openFile]);
   const reset = (0, import_react2.useCallback)(() => {
+    clearTabPaper(tabId);
     setPaper(null);
+    setRestoring(false);
     setError(null);
     setPathInput("");
     setSearchResults(null);
     if (sessionId !== void 0 && sessionId !== "") {
       void fetch(`/paper-reader/api/current?session=${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => void 0);
     }
-  }, [sessionId]);
+  }, [sessionId, tabId]);
   (0, import_react2.useEffect)(() => {
     if (paper === null || sessionId === void 0 || sessionId === "" || paper.hostStored === true) return;
     const controller = new AbortController();
@@ -396,6 +478,14 @@ function PapersBody({ reader, t, inputActions, sessionId }) {
         onQuote: quote,
         onAsk: ask
       })
+    );
+  }
+  if (restoring) {
+    return (0, import_react2.createElement)(
+      "div",
+      { className: "pr-body" },
+      (0, import_react2.createElement)("style", null, BODY_CSS),
+      (0, import_react2.createElement)("div", { className: "pr-status" }, t("loading"))
     );
   }
   return (0, import_react2.createElement)(
@@ -617,7 +707,8 @@ function apply(ctx) {
     multiple: true,
     // Hidden tabs unmount: a mounted viewer keeps a PDF worker, a document and
     // its canvas bitmaps alive, which makes many open tabs fight for memory.
-    // The reading position survives in localStorage, so reopening restores it.
+    // The body remembers the open paper per tab (Host bytes + a localStorage
+    // pointer), so a remount restores it instead of showing the empty state.
     keepMounted: false,
     title: () => t("title"),
     guide: [{

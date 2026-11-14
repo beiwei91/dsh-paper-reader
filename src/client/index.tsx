@@ -29,7 +29,8 @@ export function apply(ctx: DshClientContext): void {
     multiple: true,
     // Hidden tabs unmount: a mounted viewer keeps a PDF worker, a document and
     // its canvas bitmaps alive, which makes many open tabs fight for memory.
-    // The reading position survives in localStorage, so reopening restores it.
+    // The body remembers the open paper per tab (Host bytes + a localStorage
+    // pointer), so a remount restores it instead of showing the empty state.
     keepMounted: false,
     title: () => t('title'),
     guide: [{

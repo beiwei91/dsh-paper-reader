@@ -45,8 +45,25 @@ interface PageJob {
   cancel(): void
 }
 
+/** One page's in-flight text-layer build, cancellable when the page is released. */
+interface TextJob {
+  readonly key: string
+  promise: Promise<void>
+  cancel(): void
+}
+
+/** The mouse gesture in flight, kept so a drag can be replayed once its layer exists. */
+interface Gesture {
+  readonly page: number
+  readonly x: number
+  readonly y: number
+  /** The page already had a text layer when the press started, so nothing needs replaying. */
+  readonly hadLayer: boolean
+  readonly scrollTop: number
+}
+
 /** The current text selection in the reading surface, anchored to its page. */
-interface Selection {
+interface ReaderSelection {
   readonly page: number
   readonly quote: string
   readonly x: number
@@ -64,25 +81,12 @@ interface NoteEditor {
 const DEFAULT_PAGE: PageSize = { w: 612, h: 792 }
 const MAX_ZOOM = 4
 const MIN_ZOOM = 0.25
-const RENDER_MARGIN = 1
-const PREFETCH_AHEAD = 2
 const RENDER_DELAY_MS = 120
-const DPR_CAP = 1.5
+const DPR_CAP = 1.25
 const MAX_CANVAS_DIM = 16384
 const MAX_CANVAS_AREA = 16777216
 const MAX_HITS = 60
 const POSITION_PREFIX = 'dsh.paper-reader.pos.'
-
-/** Let the browser paint before a text layer re-lays the page out. */
-function idle(): Promise<void> {
-  return new Promise(resolve => {
-    const ric = (window as unknown as {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
-    }).requestIdleCallback
-    if (ric !== undefined) ric(() => resolve(), { timeout: 250 })
-    else window.setTimeout(resolve, 16)
-  })
-}
 const COLORS: readonly HighlightColor[] = ['yellow', 'green', 'blue', 'pink']
 
 let workerBlobUrl: string | null = null
@@ -199,6 +203,18 @@ function pageOfNode(node: Node | null, pages: readonly (HTMLDivElement | null)[]
   return index < 0 ? null : index + 1
 }
 
+/** The collapsed caret range at a viewport point, for replaying a drag. */
+function caretRangeAt(x: number, y: number): Range | null {
+  if (typeof document.caretRangeFromPoint === 'function') return document.caretRangeFromPoint(x, y)
+  if (typeof document.caretPositionFromPoint !== 'function') return null
+  const position = document.caretPositionFromPoint(x, y)
+  if (position === null) return null
+  const caret = document.createRange()
+  caret.setStart(position.offsetNode, position.offset)
+  caret.collapse(true)
+  return caret
+}
+
 /**
  * The reading surface: continuous scrolling pages, outline drawer, whole-paper
  * search, highlights with notes, zoom, and the remembered position for this paper.
@@ -235,6 +251,13 @@ export function PdfViewer({
   const scrollRaf = useRef<number | null>(null)
   const measureRaf = useRef<number | null>(null)
   const renderTimer = useRef<number | null>(null)
+  const prefetchTimer = useRef<number | null>(null)
+  /** Which scale each page's text layer was built for; dropped when the page leaves the window. */
+  const builtLayers = useRef<Map<number, string>>(new Map())
+  /** In-flight text-layer builds, so a second gesture can await the first. */
+  const textJobs = useRef<Map<number, TextJob>>(new Map())
+  /** The mouse gesture in flight; a drag that began before its layer existed is replayed after it. */
+  const gesture = useRef<Gesture | null>(null)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [failure, setFailure] = useState('')
@@ -249,14 +272,26 @@ export function PdfViewer({
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<SearchHit[] | null>(null)
   const [searching, setSearching] = useState(false)
-  const [selection, setSelection] = useState<Selection | null>(null)
+  const [selection, setSelection] = useState<ReaderSelection | null>(null)
   const [noteEditor, setNoteEditor] = useState<NoteEditor | null>(null)
 
   useEffect(() => { currentPageRef.current = currentPage }, [currentPage])
   useEffect(() => { scaleRef.current = scale }, [scale])
   useEffect(() => { highlightsRef.current = highlights }, [highlights])
 
-  // Highlights are anchored to text runs, so every (re)rendered page repaints.
+  // Text-layer run geometry is scale-specific, so a zoom drops every layer
+  // synchronously instead of leaving stale spans that would accept selection at
+  // the old coordinates; annotated pages rebuild through the effect below.
+  useEffect(() => {
+    builtLayers.current.clear()
+    for (const job of textJobs.current.values()) job.cancel()
+    textJobs.current.clear()
+    for (const element of textRefs.current) {
+      if (element !== null && element !== undefined && element.childElementCount > 0) element.replaceChildren()
+    }
+  }, [scale])
+
+  // Highlights are anchored to text runs, so every (re)built page repaints.
   useEffect(() => {
     for (let index = 0; index < textRefs.current.length; index += 1) {
       const element = textRefs.current[index]
@@ -282,7 +317,97 @@ export function PdfViewer({
     })
   }, [])
 
-  const renderPage = useCallback(async (pageNumber: number): Promise<void> => {
+  /**
+   * Build one page's text layer on demand.
+   *
+   * Laying out a dense page's text runs is the most expensive thing this panel
+   * does (thousands of absolutely positioned spans with per-run font metrics).
+   * Doing it for every rendered page while scrolling is what froze the whole
+   * app, so only pages that need it — annotated pages, search hits, and the page
+   * the reader is actually selecting on — get one. Repeated calls share one
+   * build, so a second selection gesture can await the first.
+   */
+  const buildTextLayer = useCallback((pageNumber: number): Promise<void> => {
+    const doc = docRef.current
+    if (doc === null) return Promise.resolve()
+    const key = `${pageNumber}@${scale}`
+    const running = textJobs.current.get(pageNumber)
+    if (running !== undefined) {
+      if (running.key === key) return running.promise
+      running.cancel()
+      textJobs.current.delete(pageNumber)
+    }
+    if (builtLayers.current.get(pageNumber) === key) return Promise.resolve()
+    const textEl = textRefs.current[pageNumber - 1]
+    if (textEl === null || textEl === undefined) return Promise.resolve()
+    builtLayers.current.set(pageNumber, key)
+    let cancelled = false
+    let layer: InstanceType<typeof pdfjs.TextLayer> | null = null
+    const job: TextJob = {
+      key,
+      promise: Promise.resolve(),
+      cancel(): void {
+        cancelled = true
+        layer?.cancel()
+        layer = null
+        if (builtLayers.current.get(pageNumber) === key) builtLayers.current.delete(pageNumber)
+        if (textEl.childElementCount > 0) textEl.replaceChildren()
+      },
+    }
+    job.promise = (async (): Promise<void> => {
+      try {
+        const page = await doc.getPage(pageNumber)
+        if (cancelled || builtLayers.current.get(pageNumber) !== key) return
+        const viewport = page.getViewport({ scale })
+        textEl.replaceChildren()
+        textEl.style.width = `${viewport.width}px`
+        textEl.style.height = `${viewport.height}px`
+        // PDF.js lays text runs out in `--total-scale-factor` units; a standalone
+        // text layer has to publish the factor itself.
+        textEl.style.setProperty('--total-scale-factor', String(viewport.scale))
+        const content = await page.getTextContent()
+        if (cancelled || builtLayers.current.get(pageNumber) !== key) return
+        layer = new pdfjs.TextLayer({ textContentSource: content, container: textEl, viewport })
+        await layer.render()
+        layer = null
+        if (cancelled || builtLayers.current.get(pageNumber) !== key) return
+        textCache.current.set(pageNumber, content.items.map(item => ('str' in item ? item.str : '')).join(' '))
+        markSpans(textEl, highlightRef.current)
+        paintHighlights(textEl, pageNumber, highlightsRef.current)
+      } catch (error) {
+        // A cancelled layer was already cleared, and a layer rebuilt at a newer
+        // scale now owns this element: never wipe the replacement's spans.
+        if (builtLayers.current.get(pageNumber) === key) {
+          builtLayers.current.delete(pageNumber)
+          textEl.replaceChildren()
+          if (!cancelled) console.warn('[paper-reader] text layer failed', pageNumber, error)
+        }
+      } finally {
+        if (textJobs.current.get(pageNumber) === job) textJobs.current.delete(pageNumber)
+      }
+    })()
+    textJobs.current.set(pageNumber, job)
+    return job.promise
+  }, [scale])
+
+  /** Drop one far page's bitmap and text layer, cancelling whatever is still in flight. */
+  const releasePage = useCallback((pageNumber: number): void => {
+    cancelJob(pageNumber)
+    const textJob = textJobs.current.get(pageNumber)
+    textJob?.cancel()
+    textJobs.current.delete(pageNumber)
+    builtLayers.current.delete(pageNumber)
+    const textEl = textRefs.current[pageNumber - 1]
+    if (textEl !== null && textEl !== undefined && textEl.childElementCount > 0) textEl.replaceChildren()
+    const canvas = canvasRefs.current[pageNumber - 1]
+    if (canvas !== null && canvas !== undefined && canvas.width > 1) {
+      canvas.width = 0
+      canvas.height = 0
+    }
+  }, [cancelJob])
+
+  /** Paint one page's canvas, with a watchdog so a stuck render cannot freeze the panel. */
+  const renderCanvas = useCallback(async (pageNumber: number): Promise<void> => {
     const doc = docRef.current
     if (doc === null) return
     const key = `${pageNumber}@${scale}`
@@ -291,12 +416,15 @@ export function PdfViewer({
     running?.cancel()
 
     let renderTask: { cancel(): void; promise: Promise<void> } | null = null
-    let layer: InstanceType<typeof pdfjs.TextLayer> | null = null
+    let watchdog: number | null = null
     const job: PageJob = {
       key,
       cancel(): void {
         renderTask?.cancel()
-        layer?.cancel()
+        if (watchdog !== null) {
+          window.clearTimeout(watchdog)
+          watchdog = null
+        }
       },
     }
     jobs.current.set(pageNumber, job)
@@ -307,8 +435,7 @@ export function PdfViewer({
       if (!isCurrent()) return
       const viewport = page.getViewport({ scale })
       const canvas = canvasRefs.current[pageNumber - 1]
-      const textEl = textRefs.current[pageNumber - 1]
-      if (canvas === null || canvas === undefined || textEl === null || textEl === undefined) return
+      if (canvas === null || canvas === undefined) return
       const dpr = canvasDpr(viewport)
       canvas.width = Math.max(1, Math.floor(viewport.width * dpr))
       canvas.height = Math.max(1, Math.floor(viewport.height * dpr))
@@ -318,8 +445,21 @@ export function PdfViewer({
         canvas,
         viewport,
         transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0],
+        // Links and form widgets are not part of what this reader shows; skipping
+        // their rendering keeps a heavy page's paint short.
+        annotationMode: 0,
       })
-      await renderTask.promise
+      await Promise.race([
+        renderTask.promise,
+        new Promise<never>((_resolve, reject) => {
+          watchdog = window.setTimeout(() => {
+            renderTask?.cancel()
+            reject(new Error(`page ${pageNumber} render timed out`))
+          }, 4000)
+        }),
+      ])
+      if (watchdog !== null) window.clearTimeout(watchdog)
+      watchdog = null
       renderTask = null
       if (!isCurrent()) return
       // Size the page wrapper imperatively: a state update here would re-render
@@ -331,39 +471,23 @@ export function PdfViewer({
       }
       pageSizeRef.current[pageNumber - 1] = { w: viewport.width / scale, h: viewport.height / scale }
       measureOffsets()
-      // The canvas is what the reader sees; the text layer is only needed for
-      // selection and search marks, so it waits for an idle frame.
-      await idle()
-      if (!isCurrent()) return
-      textEl.replaceChildren()
-      textEl.style.width = `${viewport.width}px`
-      textEl.style.height = `${viewport.height}px`
-      // PDF.js lays text runs out in `--total-scale-factor` units; a standalone
-      // text layer has to publish the factor itself.
-      textEl.style.setProperty('--total-scale-factor', String(viewport.scale))
-      const content = await page.getTextContent()
-      if (!isCurrent()) return
-      layer = new pdfjs.TextLayer({ textContentSource: content, container: textEl, viewport })
-      await layer.render()
-      layer = null
-      if (!isCurrent()) { textEl.replaceChildren(); return }
-      textCache.current.set(pageNumber, content.items.map(item => ('str' in item ? item.str : '')).join(' '))
-      markSpans(textEl, highlightRef.current)
-      paintHighlights(textEl, pageNumber, highlightsRef.current)
-      measureOffsets()
-      void page.cleanup()
     } catch (error) {
+      if (watchdog !== null) {
+        window.clearTimeout(watchdog)
+        watchdog = null
+      }
       if (isCurrent()) {
         jobs.current.delete(pageNumber)
         console.warn('[paper-reader] page render failed', pageNumber, error)
       }
     }
-  }, [scale])
+  }, [measureOffsets, scale])
 
   // Load the document once per byte buffer; the worker lives exactly as long.
   useEffect(() => {
     let disposed = false
     jobs.current.clear()
+    builtLayers.current.clear()
     textCache.current.clear()
     setStatus('loading')
     setFailure('')
@@ -412,6 +536,9 @@ export function PdfViewer({
       searchVersion.current += 1
       for (const job of jobs.current.values()) job.cancel()
       jobs.current.clear()
+      for (const job of textJobs.current.values()) job.cancel()
+      textJobs.current.clear()
+      builtLayers.current.clear()
       docRef.current = null
       const task = taskRef.current
       taskRef.current = null
@@ -441,29 +568,30 @@ export function PdfViewer({
     measureOffsets()
   }, [measureOffsets, numPages, scale, status])
 
-  // Re-render the pages around the reader once scrolling settles. Waiting for a
-  // pause keeps fast scrolling from cancelling and restarting renders.
+  // Paint the page under the reader first, and the neighbours only once the
+  // reader has been still for a while: canvas painting is main-thread work, so
+  // queuing several dense pages at once is what froze the whole app.
   useEffect(() => {
     if (status !== 'ready') return
     let cancelled = false
-    const from = Math.max(1, currentPage - RENDER_MARGIN)
-    const to = Math.min(numPages, currentPage + PREFETCH_AHEAD)
+    const keep = new Set([currentPage - 3, currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2, currentPage + 3])
     if (renderTimer.current !== null) window.clearTimeout(renderTimer.current)
+    if (prefetchTimer.current !== null) window.clearTimeout(prefetchTimer.current)
     renderTimer.current = window.setTimeout(() => {
       renderTimer.current = null
-      void (async () => {
-        // Release far-away bitmaps: a long paper must not keep every canvas alive.
-        for (let page = 1; page <= numPages; page += 1) {
-          if (page >= from - 2 && page <= to + 2) continue
-          const canvas = canvasRefs.current[page - 1]
-          if (canvas !== null && canvas !== undefined && canvas.width > 1) {
-            canvas.width = 0
-            canvas.height = 0
-            jobs.current.delete(page)
-          }
+      // Release far-away bitmaps and text layers: a long paper must not keep
+      // every canvas alive.
+      for (let page = 1; page <= numPages; page += 1) {
+        if (!keep.has(page)) releasePage(page)
+      }
+      void renderCanvas(currentPage)
+      prefetchTimer.current = window.setTimeout(() => {
+        prefetchTimer.current = null
+        if (cancelled) return
+        for (const page of [currentPage + 1, currentPage - 1, currentPage + 2]) {
+          if (page >= 1 && page <= numPages) void renderCanvas(page)
         }
-        for (let page = from; page <= to && !cancelled; page += 1) await renderPage(page)
-      })()
+      }, 600)
     }, RENDER_DELAY_MS)
     return () => {
       cancelled = true
@@ -471,8 +599,51 @@ export function PdfViewer({
         window.clearTimeout(renderTimer.current)
         renderTimer.current = null
       }
+      if (prefetchTimer.current !== null) {
+        window.clearTimeout(prefetchTimer.current)
+        prefetchTimer.current = null
+      }
     }
-  }, [status, currentPage, numPages, renderPage])
+  }, [numPages, currentPage, releasePage, renderCanvas, status])
+
+  // Annotated and searched pages need their text layer even before the reader
+  // touches them; everything else waits for a selection gesture. The window is
+  // small and delayed like the canvas renders, so a fast scroll cannot queue
+  // several dense layers at once.
+  useEffect(() => {
+    if (status !== 'ready') return
+    const timer = window.setTimeout(() => {
+      const from = Math.max(1, currentPage - 2)
+      const to = Math.min(numPages, currentPage + 3)
+      for (const highlight of highlights) {
+        if (highlight.page >= from && highlight.page <= to) void buildTextLayer(highlight.page)
+      }
+      if (hits === null) return
+      for (const hit of hits) {
+        if (Math.abs(hit.page - currentPage) <= 3) void buildTextLayer(hit.page)
+      }
+    }, RENDER_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [buildTextLayer, currentPage, hits, highlights, numPages, status])
+
+  // Starting a selection is what asks for a text layer on an arbitrary page.
+  const onMouseDown = useCallback((event: { target: EventTarget | null; clientX: number; clientY: number; button: number }): void => {
+    const page = event.button === 0 ? pageOfNode(event.target as Node | null, pageRefs.current) : null
+    if (page === null) {
+      gesture.current = null
+      return
+    }
+    const textEl = textRefs.current[page - 1]
+    gesture.current = {
+      page,
+      x: event.clientX,
+      y: event.clientY,
+      hadLayer: builtLayers.current.get(page) === `${page}@${scaleRef.current}` &&
+        textEl !== null && textEl !== undefined && textEl.childElementCount > 0,
+      scrollTop: scrollRef.current?.scrollTop ?? 0,
+    }
+    void buildTextLayer(page)
+  }, [buildTextLayer])
 
   // Persist the position on the way out, including the last pending scroll.
   useEffect(() => () => {
@@ -480,6 +651,7 @@ export function PdfViewer({
     if (scrollRaf.current !== null) window.cancelAnimationFrame(scrollRaf.current)
     if (measureRaf.current !== null) window.cancelAnimationFrame(measureRaf.current)
     if (renderTimer.current !== null) window.clearTimeout(renderTimer.current)
+    if (prefetchTimer.current !== null) window.clearTimeout(prefetchTimer.current)
     writePosition(storageKey, { page: currentPageRef.current, scale: scaleRef.current })
   }, [storageKey])
 
@@ -557,6 +729,8 @@ export function PdfViewer({
       }
       setHits(found)
       highlightRef.current = trimmed
+      // Marks only exist on built layers; layers built later mark themselves from
+      // `highlightRef`. The effect over `hits` builds the ones near the reader.
       for (const element of textRefs.current) if (element !== null && element !== undefined) markSpans(element, trimmed)
     } catch (error) {
       if (version === searchVersion.current) console.warn('[paper-reader] search failed', error)
@@ -594,28 +768,83 @@ export function PdfViewer({
     window.getSelection()?.removeAllRanges()
   }, [])
 
-  // A fresh selection wins; a plain click on a painted highlight opens its note.
-  const onMouseUp = useCallback((event: { clientX: number; clientY: number; target: EventTarget | null }): void => {
-    const browserSelection = window.getSelection()
-    if (browserSelection !== null && !browserSelection.isCollapsed) {
-      const quote = browserSelection.toString().trim()
-      const anchorPage = pageOfNode(browserSelection.anchorNode, pageRefs.current)
-      const focusPage = pageOfNode(browserSelection.focusNode, pageRefs.current)
-      if (quote === '' || anchorPage === null || focusPage === null || anchorPage !== focusPage) {
-        setSelection(null)
+  /** Turn a browser selection that lives inside one page into the action bar. */
+  const commitSelection = useCallback((browserSelection: Selection): boolean => {
+    const quote = browserSelection.toString().trim()
+    const anchorPage = pageOfNode(browserSelection.anchorNode, pageRefs.current)
+    const focusPage = pageOfNode(browserSelection.focusNode, pageRefs.current)
+    if (quote === '' || anchorPage === null || focusPage === null || anchorPage !== focusPage) {
+      setSelection(null)
+      return false
+    }
+    const rect = browserSelection.getRangeAt(0).getBoundingClientRect()
+    const pane = scrollRef.current?.getBoundingClientRect()
+    const left = pane?.left ?? 0
+    const width = pane?.width ?? 360
+    const x = Math.min(Math.max(rect.left + rect.width / 2, left + 12), left + width - 12)
+    setSelection({ page: anchorPage, quote: quote.slice(0, 2000), x, y: Math.max(rect.top, 12) })
+    return true
+  }, [])
+
+  /**
+   * A drag that started before its page had a text layer selects nothing, because
+   * the layer only appears during the drag. Once the build finishes, the caret at
+   * both gesture points reconstructs the same range, so the action bar still
+   * shows instead of the reader having to drag twice.
+   */
+  const replaySelection = useCallback((start: Gesture, endX: number, endY: number): void => {
+    void buildTextLayer(start.page).then(() => {
+      const scroller = scrollRef.current
+      if (scroller === null || scroller.scrollTop !== start.scrollTop) return
+      const from = caretRangeAt(start.x, start.y)
+      const to = caretRangeAt(endX, endY)
+      if (from === null || to === null) return
+      const backwards = from.compareBoundaryPoints(Range.START_TO_START, to) > 0
+      const range = document.createRange()
+      try {
+        range.setStart(
+          backwards ? to.startContainer : from.startContainer,
+          backwards ? to.startOffset : from.startOffset,
+        )
+        range.setEnd(
+          backwards ? from.startContainer : to.startContainer,
+          backwards ? from.startOffset : to.startOffset,
+        )
+      } catch {
         return
       }
-      const rect = browserSelection.getRangeAt(0).getBoundingClientRect()
-      const pane = scrollRef.current?.getBoundingClientRect()
-      const left = pane?.left ?? 0
-      const width = pane?.width ?? 360
-      const x = Math.min(Math.max(rect.left + rect.width / 2, left + 12), left + width - 12)
-      setSelection({ page: anchorPage, quote: quote.slice(0, 2000), x, y: Math.max(rect.top, 12) })
+      const browserSelection = window.getSelection()
+      if (browserSelection === null) return
+      browserSelection.removeAllRanges()
+      browserSelection.addRange(range)
+      if (!commitSelection(browserSelection)) browserSelection.removeAllRanges()
+    })
+  }, [buildTextLayer, commitSelection])
+
+  // A fresh selection wins; a plain click on a painted highlight opens its note.
+  const onMouseUp = useCallback((event: { clientX: number; clientY: number; button: number; target: EventTarget | null }): void => {
+    const started = gesture.current
+    gesture.current = null
+    const browserSelection = window.getSelection()
+    if (browserSelection !== null && !browserSelection.isCollapsed) {
+      commitSelection(browserSelection)
       return
     }
     setSelection(null)
     const ids = highlightIdsOf(event.target)
-    if (ids.length === 0) return
+    if (ids.length === 0) {
+      // Nothing selected after a real drag means the layer was still being built
+      // when the gesture began; replay it rather than failing silently.
+      if (
+        started !== null &&
+        event.button === 0 &&
+        !started.hadLayer &&
+        (Math.abs(event.clientX - started.x) > 4 || Math.abs(event.clientY - started.y) > 4)
+      ) {
+        replaySelection(started, event.clientX, event.clientY)
+      }
+      return
+    }
     const highlight = highlightsRef.current.find(candidate => candidate.id === ids[0])
     if (highlight === undefined) return
     const pane = scrollRef.current?.getBoundingClientRect()
@@ -627,7 +856,7 @@ export function PdfViewer({
       x: Math.max(8, Math.min(event.clientX, left + width - 240)),
       y: Math.max(8, event.clientY - 20),
     })
-  }, [])
+  }, [commitSelection, replaySelection])
 
   const selectionAction = useCallback((action: 'quote' | 'explain' | 'translate' | 'copy'): void => {
     if (selection === null) return
@@ -731,7 +960,7 @@ export function PdfViewer({
         onClick: () => scrollToHighlight(highlight),
       }, `p.${highlight.page} · ${highlight.quote.slice(0, 40)}${highlight.quote.length > 40 ? '…' : ''}${highlight.note === '' ? '' : ` — ${highlight.note}`}`)),
     ),
-    h('div', { className: 'pr-pages', ref: scrollRef, onScroll, onMouseUp },
+    h('div', { className: 'pr-pages', ref: scrollRef, onScroll, onMouseUp, onMouseDown },
       status === 'loading' && h('div', { className: 'pr-status' }, t('loading')),
       status === 'error' && h('div', { className: 'pr-status' }, failure),
       status === 'ready' && pageElements,
