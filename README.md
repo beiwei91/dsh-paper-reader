@@ -6,10 +6,10 @@
 
 ## 安装
 
-本仓库是一个标准 DSH bundle，以**本地目录**方式装进 profile（链接安装，改完重新构建即可生效）：
+包名 / loader id 是 **`dsh-paper-reader`**（来自 `package.json.name`），与 GitHub 仓库 `https://github.com/beiwei91/dsh-paper-reader` 同名。本仓库是一个标准 DSH bundle：
 
-- 在 DSH 的 插件/Plugins 设置里添加本地目录 `D:\CODE\dsh-paper-reader`；或
-- 让 agent 执行 `plugin_manager` 的 `install_bundle`，目标填仓库绝对路径。
+- **从 GitHub 安装**：在 DSH 的 插件/Plugins 设置里添加 `github:beiwei91/dsh-paper-reader#v0.1.0`，或让 agent 执行 `plugin_manager` 的 `install_bundle`，目标填该 spec；固定 40 位 commit 的 `git+https://github.com/beiwei91/dsh-paper-reader.git#<commit>` 可被 `plugin_manager` 视为可更新安装。
+- **本地目录**（开发/离线）：在 插件/Plugins 设置里添加本地目录 `D:\CODE\dsh-paper-reader`，或让 agent 执行 `plugin_manager` 的 `install_bundle`，目标填仓库绝对路径；链接安装改完重新构建即可生效。
 
 装好后打开右侧栏，在引导页点「论文阅读器」卡片即可打开「论文」标签页。
 

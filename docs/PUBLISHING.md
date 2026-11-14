@@ -10,7 +10,7 @@
 | 项 | 决定 |
 |---|---|
 | 本轮分发渠道 | **只走 GitHub**：仓库 + `v0.1.0` tag + GitHub Release。**不注册 npm、不 publish**。 |
-| 包名（本轮） | 发布前最后一步从 **`@local/dsh-paper-reader`** 改为 **`dsh-paper-reader`**（与仓库同名）。GitHub 安装按仓库里的 `package.json` 解析，所以改名必须在 tag 之前完成（§2）；当前仓库在改名 commit 之前仍保持 `@local/…`。 |
+| 包名（本轮） | **`dsh-paper-reader`**（与仓库同名）：改名已在发布前最后一步完成（§2，2026-11-14 的改名 commit）。`package.json.name`、`cordis.patch.yml` 行名、`TAB_ID` 与重建产物都已是新名。GitHub 安装按仓库里的 `package.json` 解析，所以 tag 仍必须打在改名 commit 之后。 |
 | GitHub 仓库 | **`https://github.com/beiwei91/dsh-paper-reader`**（已创建）。 |
 | 命名对照 | 包名/loader id = `package.json.name` = **`dsh-paper-reader`**；GitHub 仓库 = **`beiwei91/dsh-paper-reader`**（两者同名）。 |
 | 未来 npm（可选） | unscoped **`dsh-paper-reader` 已被他人占用**（rantz，1.5.0）——本轮 GitHub-only 不受影响；未来若发布 npm，必须改用 scope（如 `@beiwei91/dsh-paper-reader`，免费账号首次发布即创建）或另选未占用名字（如 `paper-reader`，2026-11-14 查询 404）。发布日决定（§12）。 |
@@ -22,8 +22,8 @@
 ### 0.1 分发决策：本轮 GitHub-only
 
 - 用户没有 npm 账号，也不需要为本轮发布注册。GitHub 仓库 + tag + Release 就能提供完整可安装的 bundle。
-- **包名按最终决定改为 `dsh-paper-reader`，但改名放在发布前最后一步**（§2）：改 `package.json.name`、`cordis.patch.yml` 行名、`TAB_ID`，重建产物后再打 tag。npm 专属元数据（删除 `private`、`publishConfig`、`repository`、`homepage`、`engines.dsh` 等）留到未来 npm 日（§3、§12）。
-- 在改名 commit 之前，repo 的 `package.json` 保持 `@local/dsh-paper-reader` + `private: true`，用户当前 link 安装的插件继续可用；tag 必须打在“改名 + 重建”之后的 commit 上，GitHub 安装用户最终拿到包名 `dsh-paper-reader`。
+- **包名按最终决定改为 `dsh-paper-reader`，且改名已在发布前最后一步完成**（§2）：`package.json.name`、`cordis.patch.yml` 行名、`TAB_ID` 已改，产物已重建。改名 commit 同时补齐公开元数据（`license`、`repository`、`homepage`、`bugs`、`keywords`）并删除 `private: true`；`engines.dsh` 与 `publishConfig` 仍留到未来 npm 日（§3、§12）。
+- 改名 commit 之前 repo 的 `package.json` 是 `@local/dsh-paper-reader` + `private: true`（当时本机 link 安装的插件继续可用）；现在改名 + 重建已提交，tag 仍必须打在“改名 + 重建”之后的 commit 上，GitHub 安装用户拿到包名 `dsh-paper-reader`。
 - **命名**：包名/loader id = `package.json.name` = **`dsh-paper-reader`**，与 GitHub 仓库 `beiwei91/dsh-paper-reader` 同名；改名必须在打 tag 前完成（§2）。
 - **npm 名可用性（2026-11-14，registry.npmjs.org）**：**`dsh-paper-reader` → 1.5.0（已被占用，另一项目 rantz）**，因此它只用于 GitHub-only 发布，不能直接 npm publish；`paper-reader` → 404（可用，可作为未来 npm 备选名）。此前对 `paper-reader`/`dsh-papers` 的 404 检查不适用于 `dsh-paper-reader`。
 
@@ -47,8 +47,8 @@
 |---|---|---|
 | **GitHub 仓库** | 已创建：`https://github.com/beiwei91/dsh-paper-reader` | 无需再填 OWNER；剩余人工步骤（topic、tag/Release、PR）见 §16。 |
 | **市场文件（可选）** | `market/beiwei91__dsh-paper-reader.yml`、`market/index.json` 已备好 | 需要用户 PR / 自托管启用（§16）；不影响直接安装。 |
-| **发布前改名（§2）** | 现在仍是 `@local/dsh-paper-reader` | 发布前最后一步改成 `dsh-paper-reader` 并重建；本机 profile 换包 + 重启一次。 |
-| `README.md` 含本机绝对路径 `D:\CODE\dsh-paper-reader` | 第 11–12 行 | 用 `docs/README.draft.md` 替换（本次不改 `README.md`）。 |
+| **发布前改名（§2）** | **已完成**：包名已改为 `dsh-paper-reader` 并重建/提交产物 | 本机 profile 仍需换包（移除旧 `@local` bundle、安装新包）+ 重启一次 DSH（§2 第 6 步，归 Desktop shell 执行）。 |
+| `README.md` 安装段与包名 | 已改写为「包名/loader id = `dsh-paper-reader`、GitHub 仓库 `beiwei91/dsh-paper-reader`」并补 GitHub 安装 spec（第 9–16 行） | 发布前仍建议用 `docs/README.draft.md` 整体覆盖（现 README 仍含本机绝对路径与开发向内容）。 |
 | 运行时验证 | 仅做过 typecheck / pack dry-run | 发布前按 §14 在真实 DSH 里装一次 GitHub tag（或本地目录）走查。 |
 | 图标/示意图授权 | `icon.svg`、`docs/preview.svg` 为仓库内文件 | 所有者确认可再分发（`host-plugin.md` 的显示资源要求）。 |
 | `testdata/attention.pdf`（2.2 MB） | 已被 `.gitignore` 忽略、未跟踪 | 保持不提交（论文 PDF 不应再分发）。 |
@@ -91,23 +91,23 @@
 
 ## 2. 发布前最后一步：改名 + 重建 + tag（GitHub-only 也执行）
 
-**时序决定：其它工作先完成，改名放在发布前的最后一步。** 在改名 commit 之前，仓库保持 `@local/dsh-paper-reader`，用户当前 link 安装的插件继续可用。
+**时序决定：其它工作先完成，改名放在发布前的最后一步。【已完成 2026-11-14】** 改名 commit 之前仓库保持 `@local/dsh-paper-reader`（当时本机 link 安装的插件继续可用）；现在仓库已是 `dsh-paper-reader`，剩余步骤只有打 tag/Release 与本机 profile 换包。
 
-改名连带步骤（顺序不能乱）：
+改名连带步骤（顺序不能乱；1–3 已完成）：
 
-1. **改 source 与 patch**：
-   - `package.json.name`：`@local/dsh-paper-reader` → `dsh-paper-reader`（只改 `name`；`private`、`version` 等本轮不动）。
+1. **改 source 与 patch**（已完成）：
+   - `package.json.name`：`@local/dsh-paper-reader` → `dsh-paper-reader`；同时删除 `private: true`，补齐 `license`/`repository`/`homepage`/`bugs`/`keywords`；**不**声明 `engines.dsh`、**不加** `publishConfig`（未来 npm 日再定，§3/§12）。
    - `cordis.patch.yml`：`name: '@local/dsh-paper-reader'` → `name: 'dsh-paper-reader'`（行 id `paper-reader` 不变；只改 `name` 字段）。
-   - `src/client/index.tsx` 的 `TAB_ID`（当前 `'@local/dsh-paper-reader'`）→ `'dsh-paper-reader'`（UI key，保持一致）。
-2. **重新构建**：`build.mjs` 用 `pkg.name` 生成模块 loader id；当前产物写死旧名（`client.js`/`client.pdf.js` 第 2 行），**loader id 必须等于包名**，所以必须 `pnpm build` 并提交重建后的 `client.js`、`client.pdf.js`、`lib/*`。不要手改产物。
-3. **替换 README**：用 `docs/README.draft.md` 覆盖 `README.md`（当前 README 含本机绝对路径，安装段也只写了本地目录）；GitHub 仓库已确定为 `beiwei91/dsh-paper-reader`，无需再填 OWNER。
+   - `src/client/index.tsx` 的 `TAB_ID`：`'@local/dsh-paper-reader'` → `'dsh-paper-reader'`（UI key，与包名保持一致）。
+2. **重新构建**（已完成）：`build.mjs` 用 `pkg.name` 生成模块 loader id；产物会写死它（`client.js`/`client.pdf.js` 第 2 行），**loader id 必须等于包名**，所以已用 `node build.mjs` 重建并提交 `client.js`、`client.pdf.js`、`lib/*`。不要手改产物。
+3. **替换 README**：`README.md` 安装段已改写为「包名/loader id = `dsh-paper-reader`、GitHub 仓库 `beiwei91/dsh-paper-reader`」并补 GitHub 安装 spec（本地目录安装保留为开发方式）；发布前仍建议用 `docs/README.draft.md` 整体覆盖（现 README 仍含本机绝对路径与开发向内容）。
 4. **校验**：`pnpm typecheck`；`git status --short` 干净；`client.js` 第 2 行 id 已是 `dsh-paper-reader`；确认 `LICENSE`、`THIRD-PARTY-LICENSES.md`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`、`locale/*.json` 都在 commit 里。
 5. **提交 + tag**：提交改名与重建产物，打 `v0.1.0`（与 `package.json.version` 一致），推送并创建 GitHub Release（§13）。
 6. **更新本机 profile（改名后必须做；需要一次 DSH 重启）**：先移除旧 `@local/dsh-paper-reader` bundle，再安装 `dsh-paper-reader`（GitHub tag 或本地目录），然后**重启一次 DSH**。旧/新 patch 都插入同一行 id `paper-reader`，不能同时存在；旧依赖键改名后也不可解析。桌面 profile 的包操作归 Desktop shell。
 7. **数据不需要迁移**：论文/缓存/标注按论文 key 的 sha1 落盘（`src/host/store.ts`），与包名无关。
 8. **不要靠改目录名完成改名**：身份来自 `package.json.name`，本地目录名仍是 `dsh-paper-reader` 无妨。
 
-**不需要**：npm 账号、`npm login`、`publishConfig`、`engines.dsh`、仓库元数据（这些是未来 npm 日的事，§3）。`private: true` 不影响从 git/tarball 安装。
+**不需要**（本轮 GitHub-only）：npm 账号、`npm login`、`publishConfig`、`engines.dsh`（这些是未来 npm 日的事，§3）。公开仓库元数据（`license`/`repository`/`homepage`/`bugs`/`keywords`）已随改名 commit 加入，`private` 已删除（§2）。
 
 ---
 
@@ -115,31 +115,14 @@
 
 > 仅当用户以后决定注册（免费）npm 账号并发布时执行。此时 `name` 已是 `dsh-paper-reader`（§2）；本节只叠加 npm 元数据与打包改动。
 
+> 注：删除 `private` 与加入 `license`/`repository`/`homepage`/`bugs`/`keywords` 已在改名 commit（§2）中提前完成；npm 日从当前 `package.json` 出发只需应用下面剩余的改动。
+
 ```diff
  {
    "name": "dsh-paper-reader",
    "version": "0.1.0",
--  "private": true,
    "type": "module",
    "main": "./lib/host.js",
-+  "license": "MIT",
-+  "repository": {
-+    "type": "git",
-+    "url": "git+https://github.com/beiwei91/dsh-paper-reader.git"
-+  },
-+  "homepage": "https://github.com/beiwei91/dsh-paper-reader#readme",
-+  "bugs": {
-+    "url": "https://github.com/beiwei91/dsh-paper-reader/issues"
-+  },
-+  "keywords": [
-+    "dsh",
-+    "deepseek-harness",
-+    "dsh-plugin",
-+    "pdf",
-+    "arxiv",
-+    "dsh-paper-reader",
-+    "pdfjs"
-+  ],
 +  "engines": {
 +    "dsh": ">=0.2.2-rc.3 <0.3.0-0"
 +  },
@@ -164,6 +147,7 @@
    "files": [
      "lib/host.js",
      "lib/pdf.worker.mjs",
+     "lib/ocr",
      "client.js",
      "client.*.js",
      "cordis.patch.yml",
@@ -181,7 +165,7 @@
 说明（npm 发布日）：
 
 - **`name` 已在 §2 改为 `dsh-paper-reader`**；注意该 unscoped 名在 npm 上**已被占用**（rantz 1.5.0），因此 npm 发布必须改用 scope（如 `@beiwei91/dsh-paper-reader`）或另选未占用名字（§12），不能直接发布 `dsh-paper-reader`。
-- **`private` 直接删除** 比 `"private": false` 更干净；npm 拒绝发布 private 包。
+- **`private` 已在 §2 删除**（删字段比 `"private": false` 更干净；npm 拒绝发布 private 包）。
 - **`engines.dsh` 建议 `>=0.2.2-rc.3 <0.3.0-0`**：devDependencies 的 DSH 类型固定 0.2.2-rc.3；语义上声明 `engines.dsh` 后只按它判定、忽略 peer，预发布参与匹配，空/非法/`workspace:` 视为不兼容。最终用真实安装验证。
 - **不需要 `dependencies`/`peerDependencies`**：`lib/host.js` 已打包 PDF.js 等依赖；客户端只把 react/react-dom 作为宿主 externals。
 - **`files`**：`"docs"` 会连带 `docs/PUBLISHING.md`、`docs/README.draft.md` 进包，所以改成精确两项；`LICENSE` npm 自动带，`THIRD-PARTY-LICENSES.md` 必须显式加入。
@@ -221,13 +205,13 @@ git diff --stat -- client.js client.pdf.js lib/
 
 本轮**不需要** npm tarball 才能安装；GitHub tag 本身即可安装。若仍想在 Release 里附一个 tarball 供人下载：
 
-- **实测现状**：`pnpm pack --dry-run` 当前输出 15 个文件（`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/preview.svg`、`docs/PUBLISHING.md`、`docs/README.draft.md`、`icon.svg`、`lib/host.js`、`lib/pdf.worker.mjs`、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`；tarball 名 `local-dsh-paper-reader-0.1.0.tgz`）。因 `files` 仍是 `"docs"`，内部发布文档会进包；`THIRD-PARTY-LICENSES.md` 因为不在 `files` 里**不会**进包。
+- **实测现状（2026-11-14，改名后）**：`pnpm pack --dry-run` 输出 **23** 个文件（`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/OCR-VERIFICATION.md`、`docs/preview.svg`、`docs/PUBLISHING.md`、`docs/README.draft.md`、`icon.svg`、`lib/host.js`、`lib/ocr/engine-impl.cjs`、`lib/ocr/engine.cjs`、`lib/ocr/worker.cjs`、`lib/ocr/tesseract-core-lstm.wasm`、`lib/ocr/tesseract-core-simd-lstm.wasm`、`lib/ocr/lang/eng.traineddata.gz`、`lib/ocr/lang/chi_sim.traineddata.gz`、`lib/pdf.worker.mjs`、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`）；tarball 名 `dsh-paper-reader-0.1.0.tgz`（实测 8,251,678 B ≈ 7.87 MiB）。因 `files` 仍是 `"docs"`，内部发布文档（`docs/PUBLISHING.md`、`docs/README.draft.md`）与 `docs/OCR-VERIFICATION.md` 会进包；`THIRD-PARTY-LICENSES.md` 因为不在 `files` 里**不会**进包（`LICENSE` 由 npm 自动带）。
 - **对 GitHub-only 的影响**：如果 Release 资产用 `pnpm pack` 的 tarball，它会缺 `THIRD-PARTY-LICENSES.md`（许可证不合规）且带内部文档。**建议二选一**：
   1. Release 资产改用 `tar.gz`/`zip` 源码归档（GitHub 自动生成，包含仓库全部 tracked 文件，含 `THIRD-PARTY-LICENSES.md`），或
   2. 在发布日临时把 §3 的 `files` 调整应用后再 `pnpm pack` 并附资产。
-- npm 发布日目标清单（14 个文件）：`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`、`lib/host.js`、`lib/pdf.worker.mjs`、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`、`THIRD-PARTY-LICENSES.md`（tarball 名 `dsh-paper-reader-0.1.0.tgz`）。
-- 体积（实测）：`client.pdf.js` 1,726,464 B + `lib/pdf.worker.mjs` 2,395,538 B + `lib/host.js` 1,053,307 B + `client.js` 27,668 B ≈ 5.2 MB（未压缩）。
-- 如要检查真实 tarball（会写文件，故本次未做）：`pnpm pack` 后 `tar -tzf local-dsh-paper-reader-0.1.0.tgz`，检查完删除、不要提交。
+- npm 发布日目标清单（`files` 精确化后）：`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`、`lib/host.js`、`lib/pdf.worker.mjs`、`lib/ocr/**`（8 个文件：engine/worker/engine-impl 与 2 个 WASM core、2 个语言包）、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`、`THIRD-PARTY-LICENSES.md`（tarball 名 `dsh-paper-reader-0.1.0.tgz`）。
+- 体积（实测，改名后）：`client.pdf.js` 1,735,431 B + `lib/pdf.worker.mjs` 2,395,538 B + `lib/host.js` 1,058,698 B + `client.js` 32,407 B ≈ 5.0 MiB（未压缩）；`lib/ocr/**` 另约 10.4 MiB；tarball 实测 8,251,678 B ≈ 7.87 MiB。
+- 如要检查真实 tarball（会写文件）：`pnpm pack` 后 `tar -tzf dsh-paper-reader-0.1.0.tgz`，检查完删除、不要提交（`.gitignore` 目前未忽略 `*.tgz`）。
 
 ---
 
@@ -310,16 +294,16 @@ dsh plugin --profile <profile> add '@beiwei91/dsh-paper-reader'
 
 本轮（GitHub 安装）不经过 npm `files`，检查项以“仓库文件齐全”为准：
 
-- [ ] `dsh.bundle.patch` 指向 `./cordis.patch.yml`；**行 id 保持 `paper-reader`**；patch 里 `name` 与 `package.json.name` 一致（改名后两者都是 `dsh-paper-reader`；改名 commit 之前是 `@local/dsh-paper-reader`）。
+- [ ] `dsh.bundle.patch` 指向 `./cordis.patch.yml`；**行 id 保持 `paper-reader`**；patch 里 `name` 与 `package.json.name` 一致（两者现在都是 `dsh-paper-reader`）。
 - [ ] `dsh.client.platform = "web"`、`immediately: true`、`inject` 四项与实际运行时依赖一致。
-- [ ] Client artifact 的 loader id == 包名（`client.js` 第 2 行；改名重建后应为 `dsh-paper-reader`）。
+- [ ] Client artifact 的 loader id == 包名（`client.js` 第 2 行已是 `dsh-paper-reader`）。
 - [ ] `locale/zh.json`、`locale/en.json` 都有 `meta.title`、`meta.description`、`meta.detail = "docs/DETAIL.md"`。
 - [ ] `docs/DETAIL.md` 恰好一行图片、相对路径 `preview.svg`、含替代文本。
 - [ ] `docs/preview.svg` 自包含、640×300、无 `text`/`foreignObject`/脚本/外链；当前是**示意图不是截图**。
 - [ ] `icon.svg`：SVG、≤256 KiB、包内路径、无外链。
 - [ ] 仓库 tracked 文件包含全部运行时文件与 `lib/pdf.worker.mjs`、`THIRD-PARTY-LICENSES.md`、`LICENSE`。
 - [ ] `engines.dsh`：**本轮不声明**（npm 发布日再加，见 §3）。
-- [ ] `private: true` 保留（GitHub 安装无影响）。
+- [ ] `private` 已删除（GitHub 安装无影响；未来 npm 发布要求非 private，见 §3）；公开元数据 `license`/`repository`/`homepage`/`bugs`/`keywords` 已加入。
 
 图标/详情页**实际渲染**未验证（本环境无浏览器控制）。发布前在运行中的 DSH 里打开一次「Plugins → 该 bundle」分别用中文/英文确认标题、描述、图片，并确认无 metadata diagnostic。
 
@@ -356,7 +340,7 @@ dsh plugin --profile <profile> add '@beiwei91/dsh-paper-reader'
 
 - 先发 GitHub Release（§11），拿到 tag 对应的 **40 位 commit**；再向 awesome 目录提 git-only entry（`url` 指仓库，`commit` 指该 tag 的 commit）。
 - 也可以自己托管一份 format-1 `index.json`，让用户把 URL 加到 Discover 的 Index sources。
-- 发布前会按 §2 把包名改成 `dsh-paper-reader`，因此 awesome 条目的 `name` 用 `dsh-paper-reader`（与安装后的包名一致）；`@local/dsh-paper-reader` 只是改名前的本地历史名。
+- 包名已在 §2 改为 `dsh-paper-reader`，因此 awesome 条目的 `name` 用 `dsh-paper-reader`（与安装后的包名一致）；`@local/dsh-paper-reader` 只是改名前的本地历史名。
 - 条目文件、自托管 format-1 index 示例与逐步人工步骤见 §16；PR 用的 entry 已放在 `market/beiwei91__dsh-paper-reader.yml`。
 
 ---
@@ -403,7 +387,7 @@ dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader
 | 安装便捷性 | 需要本机 `git` 与 GitHub 可达（`git ls-remote` 预检查；网络失败会中止，`failedAt: 'spec-host'`）。GitHub 在中国大陆网络可能不稳；Release tarball 可作备选但有 pnpm 版本注意项（§6.2）。 |
 | 供应链信号 | 没有 npm provenance/签名，信任锚是 GitHub 仓库与 tag。 |
 | 目录覆盖率 | 多数社区目录以 npm 包名为主键；git-only 条目可上（§10），但 discoverability/统计不如 npm。 |
-| 包名观感 | 改名前的本地开发阶段仍是 `@local/dsh-paper-reader`；GitHub 发布前会改成 `dsh-paper-reader`（§2），与仓库同名。 |
+| 包名观感 | 本地开发阶段曾是 `@local/dsh-paper-reader`；发布前已按 §2 改为 `dsh-paper-reader`，与仓库同名（产物已重建）。 |
 
 **仍然保留**：功能完全一致；`engines.dsh` 若声明仍会在 profile 启动时校验（git/tarball 安装则在安装完成后判定并可能回滚）；数据目录与升级兼容规则不变；bundles 的启用/禁用/移除行为不变。
 
@@ -419,7 +403,7 @@ dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader
 
 1. **发布日决定名字**：用 `pnpm view <候选名> version --registry https://registry.npmjs.org/` 确认 404（scope 名只需确认没有同名版本）；`dsh-paper-reader` 已被占用，不要用它发布。
 2. 应用 §3 的 npm 元数据 diff，并把 `name` 改为最终 npm 名（`@beiwei91/dsh-paper-reader` 或另选的 free 名）；改名连带步骤已在 §2 完成。
-3. `pnpm install && pnpm typecheck && pnpm build`；`pnpm pack --dry-run` 核对 §5 的 14 文件清单。
+3. `pnpm install && pnpm typecheck && pnpm build`；`pnpm pack --dry-run` 核对 §5 的打包清单。
 4. `npm login`；`npm publish --dry-run`（只打包校验）；`pnpm publish --access public`。
 5. 发布后：`pnpm view <最终名>@0.1.0 dist.tarball`；在干净 profile 上 `dsh plugin --profile web add <最终名>@0.1.0` 验证。
 6. 用户安装：`dsh plugin --profile <profile> add <最终名>`；之后可用 `plugin_manager` 的 `listVersions`/`updateBundle` 更新。
@@ -430,8 +414,8 @@ dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader
 
 ```powershell
 # 0）GitHub 仓库已就绪（beiwei91/dsh-paper-reader）；用 docs/README.draft.md 覆盖 README.md
-# 1）发布前最后一步：按 §2 改名（package.json name / cordis.patch.yml / TAB_ID → dsh-paper-reader）
-#    然后 pnpm build 重建产物（loader id 必须等于包名）
+# 1）发布前最后一步：按 §2 改名（package.json name / cordis.patch.yml / TAB_ID → dsh-paper-reader）—— 已完成
+#    产物已用 node build.mjs 重建（loader id 必须等于包名）
 
 # 2）构建与本地校验
 pnpm install
@@ -575,13 +559,13 @@ agent 用 `plugin_manager` → `install_bundle`，target 填同一 spec。
 
 | 谁 | 步骤 |
 |---|---|
-| **用户** | 给 `beiwei91/dsh-paper-reader` 加 GitHub topic **`dsh-plugin`**；确保仓库满 1 天；完成 §2 改名 + 重建；打 tag `v0.1.0` 并创建 Release；fork `awesome-dsh-plugin/awesome-dsh-plugin`，把 `market/beiwei91__dsh-paper-reader.yml` 复制为 `data/plugins/beiwei91__dsh-paper-reader.yml` 并提 PR（按该仓库 CI/分类要求调整 `category` 和格式）；可选：补真实截图 `screenshots.json`；可选：自托管 `market/index.json`（替换 commit 后发布）。 |
+| **用户** | 给 `beiwei91/dsh-paper-reader` 加 GitHub topic **`dsh-plugin`**；确保仓库满 1 天；（§2 改名 + 重建已完成）打 tag `v0.1.0` 并创建 Release；fork `awesome-dsh-plugin/awesome-dsh-plugin`，把 `market/beiwei91__dsh-paper-reader.yml` 复制为 `data/plugins/beiwei91__dsh-paper-reader.yml` 并提 PR（按该仓库 CI/分类要求调整 `category` 和格式）；可选：补真实截图 `screenshots.json`；可选：自托管 `market/index.json`（替换 commit 后发布）。 |
 | **我们（已交付）** | `market/beiwei91__dsh-paper-reader.yml`（PR 条目）、`market/index.json`（format-1 自托管示例，已按 `parseMarketIndex` 规则人工校验）、`docs/PUBLISHING.md` 的 release checklist（§2、§11、§13）。 |
 | **共同** | §14 运行时验证；未来 npm 发布日决定最终 npm 名（`dsh-paper-reader` 已被占用，需 scope 或 free 名）。 |
 
 ## 17. 本次核对用到的证据
 
-- `pnpm pack --dry-run`（当前 15 文件；内部 docs 会进包，`THIRD-PARTY-LICENSES.md` 未进包——见 §5）。
+- `pnpm pack --dry-run`（核对时为 15 文件；改名 + OCR 后为 23 文件，内部 docs 会进包、`THIRD-PARTY-LICENSES.md` 未进包——见 §5）。
 - `pnpm typecheck`（通过）。
 - `pnpm view dsh-paper-reader --json --registry https://registry.npmjs.org/`（**已被占用**，v1.5.0，另一项目 rantz）。
 - `pnpm view paper-reader version --registry https://registry.npmjs.org/` → 404（2026-11-14；仅作未来 npm 备选名记录，本轮不使用）。

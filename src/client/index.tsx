@@ -4,7 +4,7 @@ import { LOCALE_NS, registerPapersLocale } from './locale.ts'
 import type { DshClientContext } from './types.ts'
 
 /** Stable identity of this implementation; the key its body and title register under. */
-const TAB_ID = '@local/dsh-paper-reader'
+const TAB_ID = 'dsh-paper-reader'
 /** Type discriminator the guide entry and `openTab` name. */
 const PAPER_KIND = 'paper-reader'
 

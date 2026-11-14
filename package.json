@@ -1,9 +1,26 @@
 {
-  "name": "@local/dsh-paper-reader",
+  "name": "dsh-paper-reader",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "main": "./lib/host.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/beiwei91/dsh-paper-reader.git"
+  },
+  "homepage": "https://github.com/beiwei91/dsh-paper-reader#readme",
+  "bugs": {
+    "url": "https://github.com/beiwei91/dsh-paper-reader/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "pdf",
+    "arxiv",
+    "paper-reader",
+    "pdfjs"
+  ],
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc -p tsconfig.json"
