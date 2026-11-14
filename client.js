@@ -196,7 +196,8 @@ function readTabPaper(tabId) {
     return {
       key: parsed.key,
       name: typeof parsed.name === "string" ? parsed.name : "",
-      sessionId: typeof parsed.sessionId === "string" && parsed.sessionId !== "" ? parsed.sessionId : void 0
+      sessionId: typeof parsed.sessionId === "string" && parsed.sessionId !== "" ? parsed.sessionId : void 0,
+      path: typeof parsed.path === "string" && parsed.path !== "" ? parsed.path : void 0
     };
   } catch {
     return null;
@@ -215,7 +216,8 @@ function clearTabPaper(tabId) {
   }
 }
 function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
-  const tabId = String(useTabInfo().tab.id);
+  const { tab } = useTabInfo();
+  const tabId = String(tab.id);
   const restoreTried = (0, import_react2.useRef)("");
   const [restoring, setRestoring] = (0, import_react2.useState)(() => {
     return readTabPaper(tabId) !== null && sessionId !== void 0 && sessionId !== "";
@@ -235,6 +237,15 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
   const openSeq = (0, import_react2.useRef)(0);
   const searchSeq = (0, import_react2.useRef)(0);
   const annotations = useAnnotations(paper?.storageKey ?? null);
+  const remember = (0, import_react2.useCallback)((next) => {
+    setPaper(next);
+    writeTabPaper(tabId, {
+      key: next.storageKey,
+      name: next.name,
+      path: next.readPath,
+      sessionId: sessionId === void 0 || sessionId === "" ? void 0 : sessionId
+    });
+  }, [sessionId, tabId]);
   (0, import_react2.useEffect)(() => {
     alive.current = true;
     return () => {
@@ -269,18 +280,35 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
     restoreTried.current = tabId;
     setRestoring(true);
     void (async () => {
+      const title = stored.name || stored.key;
       try {
-        const response = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(stored.key)}`, {
-          signal: AbortSignal.timeout(6e4)
+        let bytes = null;
+        let hostStored = true;
+        try {
+          const response = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(stored.key)}`, {
+            signal: AbortSignal.timeout(6e4)
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          bytes = new Uint8Array(await response.arrayBuffer());
+        } catch (hostError) {
+          if (stored.path === void 0) throw hostError;
+          const result = await reader.readBytes(sessionId, stored.path, {});
+          if (!result.ok) throw new Error("read failed");
+          bytes = result.value.data;
+          hostStored = false;
+        }
+        if (!alive.current || bytes === null) return;
+        remember({
+          name: title,
+          storageKey: stored.key,
+          bytes,
+          hostStored,
+          readPath: stored.path
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        if (!alive.current) return;
-        setPaper({ name: stored.name || stored.key, storageKey: stored.key, bytes, hostStored: true });
         void fetch("/paper-reader/api/current", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, key: stored.key, title: stored.name })
+          body: JSON.stringify({ sessionId, key: stored.key, title })
         }).catch(() => void 0);
       } catch (reason) {
         if (!alive.current) return;
@@ -291,15 +319,7 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
         if (alive.current) setRestoring(false);
       }
     })();
-  }, [sessionId, tabId]);
-  (0, import_react2.useEffect)(() => {
-    if (paper === null) return;
-    writeTabPaper(tabId, {
-      key: paper.storageKey,
-      name: paper.name,
-      sessionId: sessionId === void 0 || sessionId === "" ? void 0 : sessionId
-    });
-  }, [paper, sessionId, tabId]);
+  }, [reader, remember, sessionId, tabId]);
   const openPath = (0, import_react2.useCallback)(async () => {
     const path = pathInput.trim();
     if (path === "") return;
@@ -320,13 +340,14 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
       }
       const bytes = result.value.data;
       if (!alive.current) return;
-      setPaper({ name: baseName(path), storageKey: result.value.absolutePath || path, bytes });
+      const absolutePath = result.value.absolutePath || path;
+      remember({ name: baseName(path), storageKey: absolutePath, bytes, readPath: absolutePath });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       if (alive.current) setBusy(false);
     }
-  }, [pathInput, reader, sessionId, t]);
+  }, [pathInput, reader, remember, sessionId, t]);
   const openArxiv = (0, import_react2.useCallback)(async (idOrUrl, knownTitle) => {
     const input = idOrUrl.trim();
     if (input === "") return;
@@ -353,13 +374,13 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
       if (!bytesResponse.ok) throw new Error(t("arxivOpenFailed"));
       const bytes = new Uint8Array(await bytesResponse.arrayBuffer());
       if (!alive.current || sequence !== openSeq.current) return;
-      setPaper({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true });
+      remember({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true });
     } catch (reason) {
       if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       if (alive.current && sequence === openSeq.current) setBusy(false);
     }
-  }, [sessionId, t]);
+  }, [remember, sessionId, t]);
   const runSearch = (0, import_react2.useCallback)(async () => {
     const query = searchQuery.trim();
     if (query === "") return;
@@ -394,11 +415,11 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (!alive.current) return;
-      setPaper({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes });
+      remember({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes });
     } catch (reason) {
       if (alive.current) setError(reason instanceof Error ? reason.message : String(reason));
     }
-  }, [t]);
+  }, [remember, t]);
   const onDragOver = (0, import_react2.useCallback)((event) => {
     event.preventDefault();
     setDropping(true);
@@ -472,6 +493,9 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
         storageKey: paper.storageKey,
         t,
         highlights: annotations.highlights,
+        // The tab type keeps this body mounted while another right-sidebar tab
+        // is in front; the viewer uses this to release its heavy resources.
+        visible: tab.visible,
         onCreateHighlight: annotations.addHighlight,
         onUpdateNote: annotations.updateNote,
         onDeleteHighlight: annotations.removeHighlight,
@@ -705,11 +729,11 @@ function apply(ctx) {
     id: TAB_ID,
     kind: PAPER_KIND,
     multiple: true,
-    // Hidden tabs unmount: a mounted viewer keeps a PDF worker, a document and
-    // its canvas bitmaps alive, which makes many open tabs fight for memory.
-    // The body remembers the open paper per tab (Host bytes + a localStorage
-    // pointer), so a remount restores it instead of showing the empty state.
-    keepMounted: false,
+    // Hidden tabs stay mounted: the paper must survive switching the right
+    // sidebar to another tab. The cost is bounded by the viewer itself, which
+    // releases its PDF worker, document, canvases and text layers once its tab
+    // has been hidden for a moment, then reloads from the bytes the body holds.
+    keepMounted: true,
     title: () => t("title"),
     guide: [{
       id: "papers",

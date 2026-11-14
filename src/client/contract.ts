@@ -20,6 +20,12 @@ export interface PdfViewerProps {
   t: (key: PaperReaderLocaleKey) => string
   /** Every stored highlight of this paper; the viewer paints the ones on screen. */
   highlights: readonly Highlight[]
+  /**
+   * Whether the tab that hosts this viewer is actually on screen. The tab body
+   * stays mounted while hidden and uses this to release the PDF worker,
+   * document, canvases and text layers until the tab is shown again.
+   */
+  visible?: boolean
   onCreateHighlight(input: { page: number; color: HighlightColor; quote: string }): void
   onUpdateNote(id: string, note: string): void
   onDeleteHighlight(id: string): void

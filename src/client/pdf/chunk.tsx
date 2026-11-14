@@ -82,6 +82,8 @@ const DEFAULT_PAGE: PageSize = { w: 612, h: 792 }
 const MAX_ZOOM = 4
 const MIN_ZOOM = 0.25
 const RENDER_DELAY_MS = 120
+/** How long a hidden tab stays loaded before its document and bitmaps are released. */
+const HIDDEN_RELEASE_MS = 1500
 const DPR_CAP = 1.25
 const MAX_CANVAS_DIM = 16384
 const MAX_CANVAS_AREA = 16777216
@@ -224,12 +226,14 @@ export function PdfViewer({
   storageKey,
   t,
   highlights,
+  visible = true,
   onCreateHighlight,
   onUpdateNote,
   onDeleteHighlight,
   onQuote,
   onAsk,
 }: PdfViewerProps): ReturnType<typeof h> {
+  const rootRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const pageRefs = useRef<(HTMLDivElement | null)[]>([])
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([])
@@ -260,6 +264,8 @@ export function PdfViewer({
   const gesture = useRef<Gesture | null>(null)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  /** Whether the document should be loaded: false while this tab is hidden. */
+  const [live, setLive] = useState(visible)
   const [failure, setFailure] = useState('')
   const [numPages, setNumPages] = useState(0)
   const [sizes, setSizes] = useState<PageSize[]>([DEFAULT_PAGE])
@@ -278,6 +284,23 @@ export function PdfViewer({
   useEffect(() => { currentPageRef.current = currentPage }, [currentPage])
   useEffect(() => { scaleRef.current = scale }, [scale])
   useEffect(() => { highlightsRef.current = highlights }, [highlights])
+
+  // A hidden tab stays mounted, so the open paper cannot disappear; only the
+  // heavy PDF resources are dropped, and only once the tab has really been
+  // hidden: the dock keeps hidden tabs in the DOM, which `getClientRects` (empty
+  // while an ancestor is `hidden`) confirms before the expensive teardown. A
+  // transient visibility flip shorter than the delay costs nothing.
+  useEffect(() => {
+    if (visible) {
+      setLive(true)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      const root = rootRef.current
+      if (root === null || root.getClientRects().length === 0) setLive(false)
+    }, HIDDEN_RELEASE_MS)
+    return () => window.clearTimeout(timer)
+  }, [visible])
 
   // Text-layer run geometry is scale-specific, so a zoom drops every layer
   // synchronously instead of leaving stale spans that would accept selection at
@@ -485,6 +508,12 @@ export function PdfViewer({
 
   // Load the document once per byte buffer; the worker lives exactly as long.
   useEffect(() => {
+    // A hidden tab keeps its component (and bytes) but no document: the cleanup
+    // below has already released it, and the tab reloads from `bytes` when shown.
+    if (!live) {
+      setStatus('loading')
+      return
+    }
     let disposed = false
     jobs.current.clear()
     builtLayers.current.clear()
@@ -546,8 +575,10 @@ export function PdfViewer({
       workerRef.current = null
       void task?.destroy()
       worker?.destroy()
+      // Hiding a tab must not lose the reader's place in the paper.
+      writePosition(storageKey, { page: currentPageRef.current, scale: scaleRef.current })
     }
-  }, [bytes, storageKey])
+  }, [live, bytes, storageKey])
 
   // Put the reader back where it was once the pages have a size.
   useEffect(() => {
@@ -896,7 +927,7 @@ export function PdfViewer({
     )
   }), [numPages, scale, sizes])
 
-  return h('div', { className: 'pr-root' },
+  return h('div', { className: 'pr-root', ref: rootRef },
     h('style', null, VIEWER_CSS),
     h('div', { className: 'pr-toolbar' },
       h('button', {

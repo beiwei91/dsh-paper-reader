@@ -27,11 +27,11 @@ export function apply(ctx: DshClientContext): void {
     id: TAB_ID,
     kind: PAPER_KIND,
     multiple: true,
-    // Hidden tabs unmount: a mounted viewer keeps a PDF worker, a document and
-    // its canvas bitmaps alive, which makes many open tabs fight for memory.
-    // The body remembers the open paper per tab (Host bytes + a localStorage
-    // pointer), so a remount restores it instead of showing the empty state.
-    keepMounted: false,
+    // Hidden tabs stay mounted: the paper must survive switching the right
+    // sidebar to another tab. The cost is bounded by the viewer itself, which
+    // releases its PDF worker, document, canvases and text layers once its tab
+    // has been hidden for a moment, then reloads from the bytes the body holds.
+    keepMounted: true,
     title: () => t('title'),
     guide: [{
       id: 'papers',

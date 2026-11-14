@@ -33,6 +33,8 @@ interface OpenPaper {
   readonly bytes: Uint8Array<ArrayBuffer>
   /** The Host already stored these bytes (arXiv open), so the upload can be skipped. */
   readonly hostStored?: boolean
+  /** The absolute path this paper was opened from, when there is one to re-read. */
+  readonly readPath?: string
 }
 
 /** The chunk is fetched once per Client module, however many tabs open; a failed fetch may retry. */
@@ -48,7 +50,7 @@ function loadViewer(): Promise<PdfChunkModule> {
 /** The complete-file cap the Host applies to `readBytes`. */
 const MAX_FILE_BYTES = 32 * 1024 * 1024
 
-/** Where this tab's open paper is remembered across the body's unmount. */
+/** Where this tab's open paper is remembered across a page reload or restart. */
 const TAB_PAPER_PREFIX = 'dsh.paper-reader.tab.'
 
 /** The durable pointer: the Host keeps the bytes, so the name is all the UI needs. */
@@ -57,6 +59,8 @@ interface StoredPaper {
   readonly name: string
   /** The session that opened it, so another session's leftover entry is never adopted. */
   readonly sessionId?: string
+  /** The absolute local path, so a restore can re-read the file when the Host lost its copy. */
+  readonly path?: string
 }
 
 function readTabPaper(tabId: string): StoredPaper | null {
@@ -69,6 +73,7 @@ function readTabPaper(tabId: string): StoredPaper | null {
       key: parsed.key,
       name: typeof parsed.name === 'string' ? parsed.name : '',
       sessionId: typeof parsed.sessionId === 'string' && parsed.sessionId !== '' ? parsed.sessionId : undefined,
+      path: typeof parsed.path === 'string' && parsed.path !== '' ? parsed.path : undefined,
     }
   } catch {
     return null
@@ -97,10 +102,12 @@ function clearTabPaper(tabId: string): void {
  * reader with its annotation store and the conversation actions.
  */
 export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: PapersBodyProps): ReturnType<typeof h> {
-  // A hidden tab unmounts this body (see the tab type's `keepMounted: false`), so
-  // the open paper lives in the Host's bytes plus one localStorage pointer keyed
-  // by this tab occurrence, and is restored on the next mount.
-  const tabId = String(useTabInfo().tab.id)
+  // The tab type keeps its body mounted while another right-sidebar tab is in
+  // front (`keepMounted: true`), so the paper stays open; the viewer releases its
+  // PDF worker/document/bitmaps after a pause instead. The localStorage pointer
+  // below is the secondary path for a page reload or a Host restart.
+  const { tab } = useTabInfo()
+  const tabId = String(tab.id)
   const restoreTried = useRef('')
   const [restoring, setRestoring] = useState<boolean>(() => {
     return readTabPaper(tabId) !== null && sessionId !== undefined && sessionId !== ''
@@ -121,6 +128,17 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
   const searchSeq = useRef(0)
   const annotations = useAnnotations(paper?.storageKey ?? null)
 
+  /** Make `next` the open paper and write the durable per-tab pointer immediately. */
+  const remember = useCallback((next: OpenPaper): void => {
+    setPaper(next)
+    writeTabPaper(tabId, {
+      key: next.storageKey,
+      name: next.name,
+      path: next.readPath,
+      sessionId: sessionId === undefined || sessionId === '' ? undefined : sessionId,
+    })
+  }, [sessionId, tabId])
+
   useEffect(() => {
     alive.current = true
     return () => {
@@ -139,10 +157,12 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
     return () => { cancelled = true }
   }, [])
 
-  // One restore attempt per mount. The Host keeps every opened paper's bytes, so
-  // a hidden tab's viewer can be rebuilt from the pointer alone; a stale pointer
-  // (Host lost the bytes, or another session wrote it) becomes the empty state
-  // instead of a broken view, and is never retried in a loop.
+  // Secondary path, one attempt per mount: after a page reload or a Host restart
+  // the body comes back with no paper state, so the durable pointer reopens it.
+  // The Host keeps every opened paper's bytes; a local-path open can also be
+  // re-read through the injected reader when the Host lost its copy. A pointer
+  // that cannot be honoured (stale session, missing bytes and no path) becomes
+  // the empty state instead of a broken view, and is never retried in a loop.
   useEffect(() => {
     if (restoreTried.current === tabId) return
     const stored = readTabPaper(tabId)
@@ -159,20 +179,39 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
     restoreTried.current = tabId
     setRestoring(true)
     void (async () => {
+      const title = stored.name || stored.key
       try {
-        const response = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(stored.key)}`, {
-          signal: AbortSignal.timeout(60_000),
+        let bytes: Uint8Array<ArrayBuffer> | null = null
+        let hostStored = true
+        try {
+          const response = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(stored.key)}`, {
+            signal: AbortSignal.timeout(60_000),
+          })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          bytes = new Uint8Array(await response.arrayBuffer())
+        } catch (hostError) {
+          // The Host may not have the bytes (restart, or an upload that never
+          // finished). A local path is the one case we can re-read ourselves.
+          if (stored.path === undefined) throw hostError
+          const result = await reader.readBytes(sessionId as never, stored.path, {})
+          if (!result.ok) throw new Error('read failed')
+          bytes = result.value.data as Uint8Array<ArrayBuffer>
+          hostStored = false
+        }
+        if (!alive.current || bytes === null) return
+        remember({
+          name: title,
+          storageKey: stored.key,
+          bytes,
+          hostStored,
+          readPath: stored.path,
         })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const bytes = new Uint8Array(await response.arrayBuffer())
-        if (!alive.current) return
-        setPaper({ name: stored.name || stored.key, storageKey: stored.key, bytes, hostStored: true })
         // The agent's paper_* tools answer about the session's current paper;
-        // remounting the tab must not leave them without one.
+        // restoring the viewer must not leave them without one.
         void fetch('/paper-reader/api/current', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sessionId, key: stored.key, title: stored.name }),
+          body: JSON.stringify({ sessionId, key: stored.key, title }),
         }).catch(() => undefined)
       } catch (reason) {
         if (!alive.current) return
@@ -183,17 +222,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
         if (alive.current) setRestoring(false)
       }
     })()
-  }, [sessionId, tabId])
-
-  // Remember this tab's paper while it is open; 换一篇 clears the pointer.
-  useEffect(() => {
-    if (paper === null) return
-    writeTabPaper(tabId, {
-      key: paper.storageKey,
-      name: paper.name,
-      sessionId: sessionId === undefined || sessionId === '' ? undefined : sessionId,
-    })
-  }, [paper, sessionId, tabId])
+  }, [reader, remember, sessionId, tabId])
 
   const openPath = useCallback(async (): Promise<void> => {
     const path = pathInput.trim()
@@ -215,13 +244,14 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       }
       const bytes = result.value.data as Uint8Array<ArrayBuffer>
       if (!alive.current) return
-      setPaper({ name: baseName(path), storageKey: result.value.absolutePath || path, bytes })
+      const absolutePath = result.value.absolutePath || path
+      remember({ name: baseName(path), storageKey: absolutePath, bytes, readPath: absolutePath })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       if (alive.current) setBusy(false)
     }
-  }, [pathInput, reader, sessionId, t])
+  }, [pathInput, reader, remember, sessionId, t])
 
   const openArxiv = useCallback(async (idOrUrl: string, knownTitle?: string): Promise<void> => {
     const input = idOrUrl.trim()
@@ -250,13 +280,13 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       const bytes = new Uint8Array(await bytesResponse.arrayBuffer())
       // A slower, earlier open must never replace the paper the user just asked for.
       if (!alive.current || sequence !== openSeq.current) return
-      setPaper({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true })
+      remember({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true })
     } catch (reason) {
       if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       if (alive.current && sequence === openSeq.current) setBusy(false)
     }
-  }, [sessionId, t])
+  }, [remember, sessionId, t])
 
   const runSearch = useCallback(async (): Promise<void> => {
     const query = searchQuery.trim()
@@ -293,11 +323,12 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
     try {
       const bytes = new Uint8Array(await file.arrayBuffer())
       if (!alive.current) return
-      setPaper({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes })
+      // A dropped file has no path to re-read; its bytes live in the Host from here on.
+      remember({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes })
     } catch (reason) {
       if (alive.current) setError(reason instanceof Error ? reason.message : String(reason))
     }
-  }, [t])
+  }, [remember, t])
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault()
@@ -382,6 +413,9 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
           storageKey: paper.storageKey,
           t,
           highlights: annotations.highlights,
+          // The tab type keeps this body mounted while another right-sidebar tab
+          // is in front; the viewer uses this to release its heavy resources.
+          visible: tab.visible,
           onCreateHighlight: annotations.addHighlight,
           onUpdateNote: annotations.updateNote,
           onDeleteHighlight: annotations.removeHighlight,
