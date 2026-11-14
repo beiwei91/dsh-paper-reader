@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Paper Reader",
+    "description": "Adds a Papers tab to the right sidebar. Phase 1 ships the skeleton only: the tab opens, while the reading layer (PDF rendering, outline, search, highlights and notes) and the agent tools arrive in later phases."
+  }
+}

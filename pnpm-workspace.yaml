@@ -1,0 +1,5 @@
+# esbuild's postinstall only validates that its platform binary is resolvable;
+# this checkout pins @esbuild/win32-x64 directly instead, and the DSH file
+# sandbox refuses the piped-stdio spawn a lifecycle script needs.
+allowBuilds:
+  esbuild: false

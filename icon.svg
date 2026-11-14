@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Paper Reader">
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <path d="M18 11h20l10 10v32a2 2 0 0 1-2 2H18a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2z" fill="#f8fafc"/>
+  <path d="M38 11v10h10z" fill="#cbd5e1"/>
+  <rect x="22" y="29" width="21" height="5" rx="2.5" fill="#2563eb"/>
+  <rect x="22" y="38" width="21" height="3" rx="1.5" fill="#cbd5e1"/>
+  <rect x="22" y="45" width="13" height="3" rx="1.5" fill="#cbd5e1"/>
+</svg>
