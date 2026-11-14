@@ -1,4 +1,5 @@
 import { createElement } from 'react'
+import { PapersBody } from './PapersBody.tsx'
 import { LOCALE_NS, registerPapersLocale } from './locale.ts'
 import type { DshClientContext } from './types.ts'
 
@@ -7,26 +8,14 @@ const TAB_ID = '@local/dsh-paper-reader'
 /** Type discriminator the guide entry and `openTab` name. */
 const PAPER_KIND = 'paper-reader'
 
-const bodyStyle = {
-  height: '100%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: '24px',
-  textAlign: 'center' as const,
-  fontSize: '13px',
-  lineHeight: 1.6,
-  color: 'var(--dsw-alias-label-secondary, #57606a)',
-}
-
-export const inject = ['slots', 'locale', 'sidebarRightTabs']
+export const inject = ['slots', 'locale', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']
 
 export function apply(ctx: DshClientContext): void {
   ctx.effect(() => registerPapersLocale(ctx), 'paper-reader: locale')
   const t = ctx.locale.bind(LOCALE_NS)
-
-  function PapersBody() {
-    return createElement('div', { style: bodyStyle, 'data-paper-reader-phase': 'skeleton' }, t('skeleton'))
+  const reader = {
+    readBytes: (sessionId: Parameters<typeof ctx.remote.workspaceFiles.readBytes>[0], path: string, options: Parameters<typeof ctx.remote.workspaceFiles.readBytes>[2], signal?: AbortSignal) =>
+      ctx.remote.workspaceFiles.readBytes(sessionId, path, options, signal),
   }
 
   function PapersTitle() {
@@ -48,9 +37,16 @@ export function apply(ctx: DshClientContext): void {
     }],
   }), 'paper-reader: tab type')
 
-  // Stage two: the keyed body and its live title chip.
+  // Stage two: the keyed body and its live title chip. The body receives the
+  // Host read and the copy function through the seat's injection, so it never
+  // reaches for the Cordis context itself.
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
-    { name: 'sidebar.right.pane.tab', key: TAB_ID, locale: LOCALE_NS },
+    {
+      name: 'sidebar.right.pane.tab',
+      key: TAB_ID,
+      locale: LOCALE_NS,
+      inject: () => ({ reader, t }),
+    },
     PapersBody,
   )), 'paper-reader: tab body')
 
