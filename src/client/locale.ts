@@ -49,6 +49,8 @@ const zh: LocaleDictOf<'paperReader'> = {
   arxivSearching: '正在搜索 arXiv…',
   arxivNoResult: '没有找到相关论文',
   arxivOpenFailed: 'arXiv 论文打开失败',
+  ocr: 'OCR',
+  ocrHint: '扫描页离线 OCR 进度（文本级，不生成文本层）',
 }
 
 const en: LocaleDictOf<'paperReader'> = {
@@ -96,6 +98,8 @@ const en: LocaleDictOf<'paperReader'> = {
   arxivSearching: 'Searching arXiv…',
   arxivNoResult: 'No matching papers',
   arxivOpenFailed: 'Could not open that arXiv paper',
+  ocr: 'OCR',
+  ocrHint: 'Scanned-page OCR progress (offline; text only, no text layer)',
 }
 
 /** Register this plugin's dictionaries; the returned disposer lives in one effect. */

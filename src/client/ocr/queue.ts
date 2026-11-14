@@ -82,6 +82,7 @@ export function createOcrScheduler(deps: OcrSchedulerDeps): OcrScheduler {
   const attempts = new Map<number, number>()
   const controller = new AbortController()
   let pending: number[] = []
+  let needFill = true
   let currentPage = 1
   let started = false
   let stopped = false
@@ -115,8 +116,8 @@ export function createOcrScheduler(deps: OcrSchedulerDeps): OcrScheduler {
         next.push(page)
       }
     }
-    pending = next
-    return next.length > 0
+    pending = next.slice(0, OCR_QUEUE_LIMIT)
+    return pending.length > 0
   }
 
   /** Wait until the reader has not scrolled for `IDLE_QUIET_MS`. */
@@ -129,10 +130,11 @@ export function createOcrScheduler(deps: OcrSchedulerDeps): OcrScheduler {
     return false
   }
 
-  async function recognize(page: number): Promise<void> {
+  /** Rasterise and recognise one page. False when the page could not be rendered. */
+  async function recognize(page: number): Promise<boolean> {
     const pageSignal = signal()
     const blob = await deps.renderPage(page, pageSignal)
-    if (blob === null || stopped) return
+    if (blob === null || stopped) return false
     const url = `${API}?key=${encodeURIComponent(deps.storageKey)}&page=${page}`
     const response = await fetch(url, {
       method: 'POST',
@@ -145,6 +147,7 @@ export function createOcrScheduler(deps: OcrSchedulerDeps): OcrScheduler {
     const body = (await response.json()) as { text?: unknown }
     const text = typeof body.text === 'string' ? body.text : ''
     if (text.trim() !== '') deps.onText(page, text)
+    return true
   }
 
   async function run(): Promise<void> {
@@ -152,7 +155,13 @@ export function createOcrScheduler(deps: OcrSchedulerDeps): OcrScheduler {
     running = true
     try {
       while (!stopped) {
-        if (pending.length === 0 && !fill()) break
+        if (pending.length === 0) {
+          // One batch per fill: draining the queue must not silently turn into a
+          // whole-document scan. A page change asks for the next batch.
+          if (!needFill) break
+          needFill = false
+          if (!fill()) break
+        }
         const page = pending.shift()
         if (page === undefined) break
         if (!(await waitUntilQuiet())) break
@@ -174,12 +183,25 @@ export function createOcrScheduler(deps: OcrSchedulerDeps): OcrScheduler {
         total += 1
         publish()
         try {
-          await recognize(page)
+          const produced = await recognize(page)
+          if (!produced) {
+            // The page left the screen (render cancelled) or could not be
+            // rasterised: do not count it as recognised, and do not retry it in
+            // this pass.
+            total -= 1
+            publish()
+            if (stopped) break
+            continue
+          }
           failures = 0
           done += 1
           publish()
         } catch (error) {
           if (stopped) break
+          // The page did not yield OCR text: take it back out of the totals so
+          // the hint keeps matching done/total, then decide whether to retry.
+          total -= 1
+          publish()
           if (error instanceof NoBytesError) {
             // The paper might still be uploading to the Host: retry later
             // instead of declaring the page done.
@@ -226,13 +248,11 @@ export function createOcrScheduler(deps: OcrSchedulerDeps): OcrScheduler {
       if (!Number.isInteger(page) || page < 1 || page > deps.numPages || page === currentPage) return
       currentPage = page
       if (stopped) return
+      needFill = true
       if (pending.length > 1) {
         pending = [...pending].sort((left, right) => Math.abs(left - page) - Math.abs(right - page))
       }
-      if (!running) {
-        fill()
-        void run()
-      }
+      if (!running) void run()
     },
     noteActivity(): void {
       lastActivity = performance.now()

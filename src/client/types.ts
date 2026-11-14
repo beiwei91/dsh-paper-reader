@@ -60,6 +60,8 @@ export type PaperReaderLocaleKey =
   | 'arxivSearching'
   | 'arxivNoResult'
   | 'arxivOpenFailed'
+  | 'ocr'
+  | 'ocrHint'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {

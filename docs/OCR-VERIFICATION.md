@@ -56,6 +56,10 @@ python scripts/ocr-fixture.py .build/ocr-fixture
 
 # 2) 端到端检查：资源完整性 → 引擎离线识别 → Host 路由 → 文本缓存 → agent 工具
 node scripts/ocr-check.mjs .build/ocr-fixture/scan.png .build/ocr-fixture/scan.pdf
+
+# 3)（可选）客户端 OCR 队列的无浏览器逻辑测试
+node node_modules/esbuild/bin/esbuild src/client/ocr/queue.ts --bundle --format=cjs --platform=node --outfile=.build/queue-test.cjs
+node scripts/ocr-queue-test.cjs
 ```
 
 `scripts/ocr-check.mjs` 的检查项（全部通过时输出 `OCR CHECK PASSED`）：
@@ -65,6 +69,14 @@ node scripts/ocr-check.mjs .build/ocr-fixture/scan.png .build/ocr-fixture/scan.p
 - Host 路由往返：`POST /paper`（image-only PDF）→ `GET /ocr` 初始为空 → `POST /ocr` 识别第 1 页并写入 `papers/<sha1>.text.json`（`ocrPages: [1]`）→ 再次 `POST /ocr` 命中缓存（不重跑识别）→ `GET /ocr` 返回缓存文本。
 - agent 工具：`paper_info` 输出 `OCR 文本: 1/1 页`，`paper_read` 输出 `[第 1 页 · OCR]`，`paper_search` 能找到 OCR 文本，`paper_outline` 不受影响。
 
+`scripts/ocr-queue-test.cjs` 在 Node 里用 stub 的 `window`/`fetch`/PDF 页验证队列行为（8 项全过时输出 `QUEUE TEST PASSED`）：
+
+- 只 POST 探测为扫描的页，顺序按距当前页由近到远（当前页优先）；
+- 进度 `done/total` 与 `textCache` 合并正确；
+- 一次 fill 最多 30 页，队列排空后不会偷偷扫全篇；
+- `stop()` 之后不再发 OCR 请求；
+- Host 已 OCR 的页（`alreadyOcred`）不会被重复 POST。
+
 实测（本机，Windows / Node 24）：
 
 - 引擎冷启动 1.7–1.9 s（worker 启动 + 4.7 MB 语言模型解压 + 首页识别），预热后**每页约 1.4–1.6 s**（1275×1650 的页面，`eng+chi_sim`）。
@@ -73,7 +85,7 @@ node scripts/ocr-check.mjs .build/ocr-fixture/scan.png .build/ocr-fixture/scan.p
 
 ## `src/client/pdf/chunk.tsx` 集成清单（锚点式）
 
-> 该集成在 `perf-fixer` 的 tab 释放提交（`9508d54`）之后合入。以下按附近代码定位，不使用行号。
+> 该集成已在 `perf-fixer` 的 tab 释放提交（`9508d54`）之后合入；以下清单按附近代码定位（不用行号），保留下来便于 review 和后续重排。
 
 1. **import**：在 `import type { PdfViewerProps } from '../contract.ts'` 之后加：
 
@@ -140,6 +152,6 @@ node scripts/ocr-check.mjs .build/ocr-fixture/scan.png .build/ocr-fixture/scan.p
 ## 残余风险
 
 - 首次打开扫描页时 Host 会做一次整篇文本抽取（`loadPaperText`）来建立逐页缓存，300 页的大文档可能多花数秒（在 Host 事件循环里异步进行，不阻塞 UI 线程，但会让该次 OCR 请求变慢）。
-- 每开一次论文最多排队约 30 页（`OCR_QUEUE_LIMIT`，可在 `src/client/ocr/queue.ts` 调整）；超出当前页附近窗口的扫描页要等滚动后队列重排/再次打开。`paper_info` 会如实报告 `OCR n/总页数`。
+- 每开一次论文最多排队约 30 页（`OCR_QUEUE_LIMIT`，可在 `src/client/ocr/queue.ts` 调整）；队列排空后不会主动扫全篇，滚动/跳页会按新的当前页继续填充，`paper_info` 会如实报告 `OCR n/总页数`。
 - `lib/ocr` 的 10.76 MiB 是提交/发布体积成本；如果发布到 npm 需要接受约 16 MB 的包体积。
 - Chromium 的 PDF 渲染与 tesseract 都会占 CPU；OCR 只在空闲时一页一页跑，但一台很慢的机器上仍能感到风扇声。

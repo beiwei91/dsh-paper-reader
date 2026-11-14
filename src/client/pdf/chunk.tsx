@@ -9,6 +9,8 @@ import { createElement as h, useCallback, useEffect, useMemo, useRef, useState }
 import workerSource from '../../../.build/pdf-worker.txt'
 import type { Highlight, HighlightColor } from '../annotations.ts'
 import type { PdfViewerProps } from '../contract.ts'
+import { createOcrScheduler, type OcrProgress, type OcrScheduler } from '../ocr/queue.ts'
+import { pageTextLength, renderPagePng, type OcrDocument } from '../ocr/raster.ts'
 import { highlightIdsOf, paintHighlights } from './marks.ts'
 import { VIEWER_CSS } from './styles.ts'
 
@@ -262,6 +264,8 @@ export function PdfViewer({
   const textJobs = useRef<Map<number, TextJob>>(new Map())
   /** The mouse gesture in flight; a drag that began before its layer existed is replayed after it. */
   const gesture = useRef<Gesture | null>(null)
+  /** Background OCR of scanned pages: one scheduler per open document. */
+  const ocrScheduler = useRef<OcrScheduler | null>(null)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   /** Whether the document should be loaded: false while this tab is hidden. */
@@ -280,10 +284,24 @@ export function PdfViewer({
   const [searching, setSearching] = useState(false)
   const [selection, setSelection] = useState<ReaderSelection | null>(null)
   const [noteEditor, setNoteEditor] = useState<NoteEditor | null>(null)
+  /** One transient toolbar line, so a gesture never looks like it did nothing. */
+  const [toast, setToast] = useState('')
+  const toastTimer = useRef<number | null>(null)
+  const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
 
   useEffect(() => { currentPageRef.current = currentPage }, [currentPage])
   useEffect(() => { scaleRef.current = scale }, [scale])
   useEffect(() => { highlightsRef.current = highlights }, [highlights])
+
+  /** Show one transient line in the toolbar; the next message replaces it. */
+  const announce = useCallback((message: string): void => {
+    setToast(message)
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => {
+      toastTimer.current = null
+      setToast('')
+    }, 2400)
+  }, [])
 
   // A hidden tab stays mounted, so the open paper cannot disappear; only the
   // heavy PDF resources are dropped, and only once the tab has really been
@@ -696,6 +714,8 @@ export function PdfViewer({
     if (scrollRaf.current !== null) return
     scrollRaf.current = window.requestAnimationFrame(() => {
       scrollRaf.current = null
+      // OCR yields to the reader: activity pushes the next page back.
+      ocrScheduler.current?.noteActivity()
       const scroller = scrollRef.current
       if (scroller === null) return
       const line = scroller.scrollTop + 80
@@ -731,6 +751,85 @@ export function PdfViewer({
     textCache.current.set(pageNumber, text)
     return text
   }, [])
+
+  // Scanned-page OCR. The scheduler rasterises a page only while the reader has
+  // been still for a while, and the Host recognises it in a worker thread; OCR
+  // text is merged into `textCache` for search only, never into a text layer.
+  const ocrCachedText = useCallback((page: number): string | null => textCache.current.get(page) ?? null, [])
+  const ocrProbeText = useCallback((page: number): Promise<number> => {
+    const doc = docRef.current
+    return doc === null ? Promise.resolve(0) : pageTextLength(doc as unknown as OcrDocument, page)
+  }, [])
+  const ocrRenderPage = useCallback((page: number, signal: AbortSignal): Promise<Blob | null> => {
+    const doc = docRef.current
+    return doc === null ? Promise.resolve(null) : renderPagePng(doc as unknown as OcrDocument, page, signal)
+  }, [])
+  const ocrMergeText = useCallback((page: number, text: string): void => {
+    textCache.current.set(page, text)
+  }, [])
+
+  // One OCR pass per open document: pick up the Host's already-OCR'd pages
+  // (so reopening never re-recognises), then queue the scanned pages around the
+  // reader. Cleanup aborts the in-flight request/render when the paper changes,
+  // the tab unmounts, or the document is released while hidden.
+  useEffect(() => {
+    if (status !== 'ready' || numPages === 0) return
+    let disposed = false
+    const cacheController = new AbortController()
+    void (async () => {
+      const alreadyOcred = new Set<number>()
+      try {
+        const response = await fetch(`/paper-reader/api/ocr?key=${encodeURIComponent(storageKey)}`, {
+          signal: cacheController.signal,
+        })
+        if (response.ok) {
+          const body = (await response.json()) as { done?: unknown; pages?: unknown }
+          if (Array.isArray(body.done)) {
+            for (const page of body.done) if (typeof page === 'number') alreadyOcred.add(page)
+          }
+          if (Array.isArray(body.pages)) {
+            for (const entry of body.pages) {
+              const row = entry as { page?: unknown; text?: unknown }
+              if (typeof row.page === 'number' && typeof row.text === 'string' && row.text.trim() !== '') {
+                textCache.current.set(row.page, row.text)
+              }
+            }
+          }
+        }
+      } catch (error) {
+        if (!cacheController.signal.aborted) console.warn('[paper-reader] OCR cache unavailable', error)
+      }
+      if (disposed) return
+      const scheduler = createOcrScheduler({
+        numPages,
+        storageKey,
+        alreadyOcred,
+        getCachedText: ocrCachedText,
+        probeText: ocrProbeText,
+        renderPage: ocrRenderPage,
+        onText: ocrMergeText,
+        onProgress: setOcrProgress,
+        onError: error => console.warn('[paper-reader] OCR skipped a page', error),
+      })
+      ocrScheduler.current = scheduler
+      // The reader may have been restored to a page other than the first one.
+      scheduler.setCurrentPage(currentPageRef.current)
+      scheduler.start()
+    })()
+    return () => {
+      disposed = true
+      cacheController.abort()
+      const scheduler = ocrScheduler.current
+      ocrScheduler.current = null
+      scheduler?.stop()
+    }
+  }, [numPages, ocrCachedText, ocrMergeText, ocrProbeText, ocrRenderPage, status, storageKey])
+
+  // The page under the reader goes first: reorder the remaining OCR queue on
+  // every page change, and restart the loop when the queue had already drained.
+  useEffect(() => {
+    ocrScheduler.current?.setCurrentPage(currentPage)
+  }, [currentPage])
 
   const runSearch = useCallback(async (needle: string): Promise<void> => {
     const trimmed = needle.trim()
@@ -784,12 +883,14 @@ export function PdfViewer({
     const width = scrollRef.current?.clientWidth ?? 0
     const first = pageSizeRef.current[0] ?? sizes[0] ?? DEFAULT_PAGE
     if (width > 40) {
+      ocrScheduler.current?.noteActivity()
       for (const page of jobs.current.keys()) cancelJob(page)
       setScale(clampZoom((width - 28) / first.w))
     }
   }, [cancelJob, sizes])
 
   const zoomBy = useCallback((factor: number): void => {
+    ocrScheduler.current?.noteActivity()
     for (const page of jobs.current.keys()) cancelJob(page)
     setScale(previous => clampZoom(previous * factor))
   }, [cancelJob])
@@ -943,6 +1044,7 @@ export function PdfViewer({
         onClick: () => { setShowNotes(value => !value); setShowSearch(false); setShowOutline(false) },
       }, t('notes')),
       h('span', { className: 'pr-spacer' }),
+      ocrProgress !== null && h('span', { className: 'pr-ocr', title: t('ocrHint') }, `${t('ocr')} ${ocrProgress.done}/${ocrProgress.total}`),
       h('button', { type: 'button', className: 'pr-btn', title: t('zoomOut'), onClick: () => zoomBy(1 / 1.2) }, '−'),
       h('span', { className: 'pr-num' }, `${currentPage} / ${numPages || '–'}`),
       h('button', { type: 'button', className: 'pr-btn', title: t('zoomIn'), onClick: () => zoomBy(1.2) }, '+'),

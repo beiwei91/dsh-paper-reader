@@ -34,6 +34,7 @@ export const VIEWER_CSS = `
 .pr-note-actions{display:flex;gap:4px;justify-content:flex-end}
 .pr-status{padding:20px 12px;font-size:12px;line-height:1.6;text-align:center;color:var(--dsw-alias-label-secondary,#57606a)}
 .pr-num{font-size:11px;color:var(--dsw-alias-label-secondary,#57606a);font-variant-numeric:tabular-nums;padding:0 4px}
+.pr-ocr{font-size:10px;color:var(--dsw-alias-label-tertiary,#8b949e);font-variant-numeric:tabular-nums;padding:0 4px;white-space:nowrap}
 .pr-bar{display:flex;align-items:center;gap:4px;padding:4px 6px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08))}
 .pr-input{flex:1 1 auto;min-width:0;border:1px solid var(--dsw-alias-border-primary,rgba(0,0,0,.16));border-radius:6px;padding:3px 7px;font:inherit;font-size:12px;background:var(--dsw-alias-bg-primary,#fff);color:inherit;outline:none}
 .pr-input:focus{border-color:var(--dsw-focus-ring-color,#3b82f6)}

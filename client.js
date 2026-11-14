@@ -655,7 +655,9 @@ var zh = {
   arxivSearch: "\u641C\u7D22",
   arxivSearching: "\u6B63\u5728\u641C\u7D22 arXiv\u2026",
   arxivNoResult: "\u6CA1\u6709\u627E\u5230\u76F8\u5173\u8BBA\u6587",
-  arxivOpenFailed: "arXiv \u8BBA\u6587\u6253\u5F00\u5931\u8D25"
+  arxivOpenFailed: "arXiv \u8BBA\u6587\u6253\u5F00\u5931\u8D25",
+  ocr: "OCR",
+  ocrHint: "\u626B\u63CF\u9875\u79BB\u7EBF OCR \u8FDB\u5EA6\uFF08\u6587\u672C\u7EA7\uFF0C\u4E0D\u751F\u6210\u6587\u672C\u5C42\uFF09"
 };
 var en = {
   title: "Papers",
@@ -701,7 +703,9 @@ var en = {
   arxivSearch: "Search",
   arxivSearching: "Searching arXiv\u2026",
   arxivNoResult: "No matching papers",
-  arxivOpenFailed: "Could not open that arXiv paper"
+  arxivOpenFailed: "Could not open that arXiv paper",
+  ocr: "OCR",
+  ocrHint: "Scanned-page OCR progress (offline; text only, no text layer)"
 };
 function registerPapersLocale(ctx) {
   const disposeZh = ctx.locale.register(LOCALE_NS, "zh", zh);

@@ -32,7 +32,6 @@ interface OcrPage {
     readonly promise: Promise<void>
     cancel(): void
   }
-  cleanup?(): void
 }
 
 /** The part of the PDF.js document this module needs. */
@@ -52,12 +51,10 @@ function visibleChars(items: readonly unknown[]): number {
 
 /** Count the visible characters of one page's text layer (0 for a scan). */
 export async function pageTextLength(doc: OcrDocument, pageNumber: number): Promise<number> {
+  // No page.cleanup() here: PDFPageProxy.cleanup() triggers document-wide
+  // resource cleanup and is not safe to interleave with the reader's painting.
   const page = (await doc.getPage(pageNumber)) as OcrPage
-  try {
-    return visibleChars((await page.getTextContent()).items)
-  } finally {
-    page.cleanup?.()
-  }
+  return visibleChars((await page.getTextContent()).items)
 }
 
 function blobOf(canvas: HTMLCanvasElement): Promise<Blob | null> {
@@ -110,6 +107,5 @@ export async function renderPagePng(
       canvas.width = 0
       canvas.height = 0
     }
-    page.cleanup?.()
   }
 }
