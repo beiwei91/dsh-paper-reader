@@ -60,6 +60,8 @@ export type PaperReaderLocaleKey =
   | 'arxivSearching'
   | 'arxivNoResult'
   | 'arxivOpenFailed'
+  | 'highlightSaved'
+  | 'errorNoActions'
   | 'ocr'
   | 'ocrHint'
 

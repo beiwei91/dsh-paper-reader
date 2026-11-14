@@ -388,13 +388,24 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
     inputActions?.insertQuote(cite(text, page))
   }, [cite, inputActions])
 
+  /**
+   * Quote a passage and ask about it in ONE deterministic editor mutation.
+   *
+   * The old two-step (insertQuote, then insertText over a captured span) relied
+   * on two editor projections settling before `submit()` snapshotted the draft;
+   * when the instruction did not land, the sent message carried only the quote
+   * and the agent naturally explained instead of translating. One setDraft writes
+   * the whole message — blockquote + attribution + explicit instruction outside
+   * the quote — so submit always sends both halves in the right order.
+   */
   const ask = useCallback((text: string, page: number, kind: 'explain' | 'translate'): void => {
-    if (inputActions === undefined) return
-    // Both edits are refusable (frozen composer, claimed command chip); a refused
-    // quote must never fall through to submitting a bare prompt.
-    if (!inputActions.insertQuote(cite(text, page))) return
-    const span = inputActions.captureInsertion()
-    if (!inputActions.insertText(` ${kind === 'explain' ? t('explainPrompt') : t('translatePrompt')}`, span)) return
+    if (inputActions === undefined) {
+      setError(t('errorNoActions'))
+      return
+    }
+    const instruction = kind === 'explain' ? t('explainPrompt') : t('translatePrompt')
+    const quoted = cite(text, page).split('\n').map(line => `> ${line}`).join('\n')
+    inputActions.setDraft(`${quoted}\n\n${instruction}`)
     inputActions.submit()
   }, [cite, inputActions, t])
 

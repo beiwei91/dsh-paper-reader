@@ -470,10 +470,15 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
     inputActions?.insertQuote(cite(text, page));
   }, [cite, inputActions]);
   const ask = (0, import_react2.useCallback)((text, page, kind) => {
-    if (inputActions === void 0) return;
-    if (!inputActions.insertQuote(cite(text, page))) return;
-    const span = inputActions.captureInsertion();
-    if (!inputActions.insertText(` ${kind === "explain" ? t("explainPrompt") : t("translatePrompt")}`, span)) return;
+    if (inputActions === void 0) {
+      setError(t("errorNoActions"));
+      return;
+    }
+    const instruction = kind === "explain" ? t("explainPrompt") : t("translatePrompt");
+    const quoted = cite(text, page).split("\n").map((line) => `> ${line}`).join("\n");
+    inputActions.setDraft(`${quoted}
+
+${instruction}`);
     inputActions.submit();
   }, [cite, inputActions, t]);
   if (paper !== null) {
@@ -647,8 +652,8 @@ var zh = {
   notePlaceholder: "\u5199\u70B9\u8FB9\u6CE8\u2026",
   noteSave: "\u4FDD\u5B58",
   noteDelete: "\u5220\u9664",
-  explainPrompt: "\u8BF7\u89E3\u91CA\u8FD9\u6BB5\u3002",
-  translatePrompt: "\u8BF7\u628A\u8FD9\u6BB5\u7FFB\u8BD1\u6210\u4E2D\u6587\u3002",
+  explainPrompt: "\u8BF7\u89E3\u91CA\u8FD9\u6BB5\uFF1A",
+  translatePrompt: "\u8BF7\u628A\u8FD9\u6BB5\u7FFB\u8BD1\u6210\u4E2D\u6587\uFF1A",
   arxivIdPlaceholder: "arXiv \u94FE\u63A5\u6216 ID\uFF0C\u5982 1706.03762",
   arxivOpen: "\u6253\u5F00",
   arxivSearchPlaceholder: "\u641C\u7D22 arXiv \u8BBA\u6587",
@@ -656,6 +661,8 @@ var zh = {
   arxivSearching: "\u6B63\u5728\u641C\u7D22 arXiv\u2026",
   arxivNoResult: "\u6CA1\u6709\u627E\u5230\u76F8\u5173\u8BBA\u6587",
   arxivOpenFailed: "arXiv \u8BBA\u6587\u6253\u5F00\u5931\u8D25",
+  highlightSaved: "\u5DF2\u9AD8\u4EAE",
+  errorNoActions: "\u5BF9\u8BDD\u8F93\u5165\u6846\u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u53D1\u9001\u8FD9\u6BB5\u5185\u5BB9",
   ocr: "OCR",
   ocrHint: "\u626B\u63CF\u9875\u79BB\u7EBF OCR \u8FDB\u5EA6\uFF08\u6587\u672C\u7EA7\uFF0C\u4E0D\u751F\u6210\u6587\u672C\u5C42\uFF09"
 };
@@ -695,8 +702,8 @@ var en = {
   notePlaceholder: "Write a margin note\u2026",
   noteSave: "Save",
   noteDelete: "Delete",
-  explainPrompt: "Explain this passage.",
-  translatePrompt: "Translate this passage into Chinese.",
+  explainPrompt: "Explain this passage:",
+  translatePrompt: "Translate this passage into Chinese:",
   arxivIdPlaceholder: "arXiv link or id, e.g. 1706.03762",
   arxivOpen: "Open",
   arxivSearchPlaceholder: "Search arXiv",
@@ -704,6 +711,8 @@ var en = {
   arxivSearching: "Searching arXiv\u2026",
   arxivNoResult: "No matching papers",
   arxivOpenFailed: "Could not open that arXiv paper",
+  highlightSaved: "Highlighted",
+  errorNoActions: "The conversation composer is unavailable, so this cannot be sent",
   ocr: "OCR",
   ocrHint: "Scanned-page OCR progress (offline; text only, no text layer)"
 };

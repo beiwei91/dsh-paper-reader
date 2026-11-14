@@ -264,6 +264,8 @@ export function PdfViewer({
   const textJobs = useRef<Map<number, TextJob>>(new Map())
   /** The mouse gesture in flight; a drag that began before its layer existed is replayed after it. */
   const gesture = useRef<Gesture | null>(null)
+  /** Guards one pointer press from also running its synthetic click action. */
+  const actionGuard = useRef(false)
   /** Background OCR of scanned pages: one scheduler per open document. */
   const ocrScheduler = useRef<OcrScheduler | null>(null)
 
@@ -701,6 +703,7 @@ export function PdfViewer({
     if (measureRaf.current !== null) window.cancelAnimationFrame(measureRaf.current)
     if (renderTimer.current !== null) window.clearTimeout(renderTimer.current)
     if (prefetchTimer.current !== null) window.clearTimeout(prefetchTimer.current)
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current)
     writePosition(storageKey, { page: currentPageRef.current, scale: scaleRef.current })
   }, [storageKey])
 
@@ -999,6 +1002,36 @@ export function PdfViewer({
     clearSelection()
   }, [clearSelection, onAsk, onQuote, selection])
 
+  /** Create a highlight from the current selection and confirm it visibly. */
+  const createHighlight = useCallback((color: HighlightColor): void => {
+    if (selection === null) return
+    const page = selection.page
+    onCreateHighlight({ page, color, quote: selection.quote })
+    clearSelection()
+    // A page whose text layer was released gets it back before the mark can be
+    // painted; buildTextLayer repaints highlights with the latest stored list.
+    void buildTextLayer(page)
+    announce(`${t('highlightSaved')} p.${page}`)
+  }, [announce, buildTextLayer, clearSelection, onCreateHighlight, selection, t])
+
+  /**
+   * Run a selection-popover action on the press itself, with the press's default
+   * prevented so the browser selection being quoted survives the click. The
+   * click handler stays for keyboard activation, and a guard keeps a real
+   * pointer press from running the same action twice.
+   */
+  const pressAction = useCallback((run: () => void) => {
+    const press = (event: { preventDefault(): void; stopPropagation(): void }): void => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (actionGuard.current) return
+      actionGuard.current = true
+      run()
+      window.setTimeout(() => { actionGuard.current = false }, 0)
+    }
+    return { onPointerDown: press, onClick: press }
+  }, [])
+
   const saveNote = useCallback((): void => {
     if (noteEditor !== null) onUpdateNote(noteEditor.id, noteEditor.note)
     setNoteEditor(null)
@@ -1049,6 +1082,7 @@ export function PdfViewer({
       h('span', { className: 'pr-num' }, `${currentPage} / ${numPages || '–'}`),
       h('button', { type: 'button', className: 'pr-btn', title: t('zoomIn'), onClick: () => zoomBy(1.2) }, '+'),
       h('button', { type: 'button', className: 'pr-btn', title: t('fitWidth'), onClick: fitWidth }, '⤢'),
+      toast !== '' && h('span', { className: 'pr-toast', role: 'status' }, toast),
     ),
     showSearch && h('div', { className: 'pr-bar' },
       h('input', {
@@ -1109,12 +1143,12 @@ export function PdfViewer({
         className: 'pr-swatch',
         'data-color': color,
         title: t('highlight'),
-        onClick: () => { onCreateHighlight({ page: selection.page, color, quote: selection.quote }); clearSelection() },
+        ...pressAction(() => createHighlight(color)),
       })),
-      h('button', { type: 'button', className: 'pr-btn', onClick: () => selectionAction('quote') }, t('quoteAction')),
-      h('button', { type: 'button', className: 'pr-btn', onClick: () => selectionAction('explain') }, t('explain')),
-      h('button', { type: 'button', className: 'pr-btn', onClick: () => selectionAction('translate') }, t('translate')),
-      h('button', { type: 'button', className: 'pr-btn', onClick: () => selectionAction('copy') }, t('copy')),
+      h('button', { type: 'button', className: 'pr-btn', ...pressAction(() => selectionAction('quote')) }, t('quoteAction')),
+      h('button', { type: 'button', className: 'pr-btn', ...pressAction(() => selectionAction('explain')) }, t('explain')),
+      h('button', { type: 'button', className: 'pr-btn', ...pressAction(() => selectionAction('translate')) }, t('translate')),
+      h('button', { type: 'button', className: 'pr-btn', ...pressAction(() => selectionAction('copy')) }, t('copy')),
     ),
     noteEditor !== null && h('div', {
       className: 'pr-note',
