@@ -1,6 +1,6 @@
 <!--
 本文件是公开发布用的 README 草稿，用于替换仓库根目录的 README.md。
-发布前把 `<OWNER>` 全部替换为真实 GitHub 用户/组织名（见 docs/PUBLISHING.md §13）。
+发布前把 `<OWNER>` 全部替换为真实 GitHub 用户/组织名（见 docs/PUBLISHING.md §15）。
 相对链接以仓库根目录为基准；`docs/PUBLISHING.md` 是内部发布清单，不属于对外文档，但留在仓库里。
 -->
 
@@ -16,7 +16,7 @@
 ![论文阅读器示意（功能示意，非真实截图）](docs/preview.svg)
 
 - 运行环境：DSH **0.2.2-rc.3** 上开发与验证（`engines.dsh` 计划声明为 `>=0.2.2-rc.3 <0.3.0-0`，见 `docs/PUBLISHING.md`）。
-- 发布名：npm 包 **`dsh-papers`**；仓库 `https://github.com/<OWNER>/dsh-papers`（`<OWNER>` 为占位，发布前替换）。
+- 包名与仓库名：**`paper-reader`**（仓库 `https://github.com/<OWNER>/paper-reader`）；首发只走 **GitHub**（tag `v0.1.0`），npm 发布为未来可选项。
 - 许可证：MIT；内置 PDF.js（Apache-2.0）的第三方许可见 `THIRD-PARTY-LICENSES.md`。
 
 ---
@@ -85,32 +85,52 @@
 
 ## 安装
 
-本仓库是一个标准 DSH bundle（`package.json` 里声明 `dsh.bundle.patch`）。
+本仓库是一个标准 DSH bundle（`package.json` 里声明 `dsh.bundle.patch`）。**首发只通过 GitHub 分发**（仓库 `https://github.com/<OWNER>/paper-reader`，tag `v0.1.0`）；npm 包 `paper-reader` 只是未来的可选项。
 
-### 方式一：本地目录（当前推荐，仓库尚未发布到 npm）
+### 方式一：GitHub tag（推荐）
 
-- 在 DSH 的 Plugins 设置里 **Add plugin / 添加本地目录**，选择本仓库目录；或
-- 让 agent 调 `plugin_manager` 的 `install_bundle`，目标填本仓库绝对路径。
+需要本机 `git` 与 GitHub 网络。把 `<OWNER>`、`<profile>` 换成实际值：
+
+```powershell
+dsh plugin --profile <profile> add 'github:<OWNER>/paper-reader#v0.1.0'
+```
+
+等价写法：
+
+```powershell
+dsh plugin --profile <profile> add 'git+https://github.com/<OWNER>/paper-reader.git#v0.1.0'
+```
+
+- 建议用引号包住 spec，避免 PowerShell 把 `#` 当注释。
+- 仓库里已提交构建产物，安装时**不需要本地构建**，也没有安装脚本需要审批。
+- 安装后 bundle 默认启用；替换已安装版本需要重启 DSH。
+- 让 agent 安装时，`plugin_manager` 的 `install_bundle` target 填同一个 spec。
+- **DSH Desktop** 的 `desktop` profile 由桌面端管理，请用 Desktop 的 Plugins 设置或 agent 的 `plugin_manager`。
+
+### 方式二：GitHub Release tarball（备选）
+
+```powershell
+dsh plugin --profile <profile> add 'https://github.com/<OWNER>/paper-reader/releases/download/v0.1.0/paper-reader-0.1.0.tgz'
+```
+
+> 注意：pnpm 11.0–11.8 配合 DSH profile 的 hoisted 布局安装裸 Release 资产 URL 时可能报 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`（11.9+ 正常）。优先用上面的 tag 安装。
+
+### 方式三：本地目录（开发/离线）
+
+- DSH 的 Plugins 设置里 **Add plugin / 添加本地目录**，选择本仓库目录；或
+- 让 agent 调 `plugin_manager` 的 `install_bundle`，target 填本仓库绝对路径。
 
 本地目录是链接安装：修改源码后需要重新构建并重新加载插件条目（关掉再打开该插件）。
 
-### 方式二：npm 包 `dsh-papers`（发布后可用）
+### 方式四：npm 包 `paper-reader`（计划中，尚未发布）
 
 ```powershell
-dsh plugin --profile <profile> add dsh-papers
+dsh plugin --profile <profile> add paper-reader   # 仅在 npm 发布后才可用
 ```
 
-- 适用于 `web` 等由 CLI 管理的 profile；安装后 bundle 默认启用。
-- **DSH Desktop** 的 `desktop` profile 由桌面端管理，请在 Desktop 的 Plugins 设置里安装。
-- 也可从 GitHub Release 的预构建 tarball 安装（无需本地构建脚本）：
-
-```powershell
-dsh plugin --profile <profile> add https://github.com/<OWNER>/dsh-papers/releases/download/v0.1.0/dsh-papers-0.1.0.tgz
-```
+> 目前 npm 上还没有这个包；安装方式以 GitHub 的 tag 为准。`<OWNER>` 待填。
 
 安装后：打开右侧栏 → 在引导页点「论文阅读器」卡片 → 打开「论文」标签页。
-
-> 发布包名 `dsh-papers`，安装方式以 npm 上的实际包为准；`<OWNER>` 待填。
 
 ---
 
@@ -213,4 +233,4 @@ Data lives under `$DSH_HOME/paper-reader/` (paper bytes, extracted-text cache, a
 
 **Known limitations:** scanned PDFs have no text layer (OCR is a work in progress — see the marked TODO above); cross-page selections are rejected; duplicated text on a page is highlighted at its first occurrence only; moving/renaming a local PDF detaches its annotations; a 32 MiB file cap; the first selection drag on a page builds its text layer and takes a moment.
 
-Install (once published) with `dsh plugin --profile <profile> add dsh-papers`, or point DSH at this directory for a linked local install. Development: `pnpm install && pnpm build && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/<OWNER>/dsh-papers` (owner placeholder — to be filled in before publication).
+Install from the GitHub tag: `dsh plugin --profile <profile> add 'github:<OWNER>/paper-reader#v0.1.0'` (or the Release tarball URL); a local directory can be linked for development. An npm package `paper-reader` is planned, not published yet. Development: `pnpm install && pnpm build && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/<OWNER>/paper-reader` (owner placeholder — to be filled in before publication).
