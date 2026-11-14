@@ -1,6 +1,6 @@
 <!--
 本文件是公开发布用的 README 草稿，用于替换仓库根目录的 README.md。
-发布前把 `<OWNER>` 全部替换为真实 GitHub 用户/组织名（见 docs/PUBLISHING.md §15）。
+GitHub 仓库：`https://github.com/beiwei91/dsh-paper-reader`（包名/loader 名仍是 `dsh-paper-reader`；市场与发布见 docs/PUBLISHING.md §15–§16）。
 相对链接以仓库根目录为基准；`docs/PUBLISHING.md` 是内部发布清单，不属于对外文档，但留在仓库里。
 -->
 
@@ -15,8 +15,8 @@
 
 ![论文阅读器示意（功能示意，非真实截图）](docs/preview.svg)
 
-- 运行环境：DSH **0.2.2-rc.3** 上开发与验证（`engines.dsh` 计划声明为 `>=0.2.2-rc.3 <0.3.0-0`，见 `docs/PUBLISHING.md`）。
-- 包名与仓库名：**`paper-reader`**（仓库 `https://github.com/<OWNER>/paper-reader`）；首发只走 **GitHub**（tag `v0.1.0`），npm 发布为未来可选项。
+- 运行环境：DSH **0.2.2-rc.3** 上开发与验证（本轮**不声明** `engines.dsh`；未来 npm 发布日再按 `docs/PUBLISHING.md` §3 加）。
+- 命名：包名/loader id = **`dsh-paper-reader`**（来自 `package.json.name`），与 GitHub 仓库 `https://github.com/beiwei91/dsh-paper-reader` 同名。首发只走 **GitHub**（tag `v0.1.0`）；npm 发布为未来可选项（unscoped 名已被占用，见 docs/PUBLISHING.md §12）。
 - 许可证：MIT；内置 PDF.js（Apache-2.0）的第三方许可见 `THIRD-PARTY-LICENSES.md`。
 
 ---
@@ -85,20 +85,23 @@
 
 ## 安装
 
-本仓库是一个标准 DSH bundle（`package.json` 里声明 `dsh.bundle.patch`）。**首发只通过 GitHub 分发**（仓库 `https://github.com/<OWNER>/paper-reader`，tag `v0.1.0`）；npm 包 `paper-reader` 只是未来的可选项。
+本仓库是一个标准 DSH bundle（`package.json` 里声明 `dsh.bundle.patch`）。**首发只通过 GitHub 分发**（仓库 `https://github.com/beiwei91/dsh-paper-reader`，tag `v0.1.0`）；npm 上该 unscoped 名已被占用，未来发布需改用 scope（如 `@beiwei91/dsh-paper-reader`）或另选名字。
 
-### 方式一：GitHub tag（推荐）
+### 方式一：从 GitHub 仓库安装（推荐）
 
-需要本机 `git` 与 GitHub 网络。把 `<OWNER>`、`<profile>` 换成实际值：
+包名/loader 名与 GitHub 仓库同名（`dsh-paper-reader`，来自 `package.json.name`）。
+
+需要本机 `git` 与 GitHub 网络。推荐固定 40 位 commit（可被 `plugin_manager` 视为可更新的 git 安装）：
 
 ```powershell
-dsh plugin --profile <profile> add 'github:<OWNER>/paper-reader#v0.1.0'
+# <40-hex commit> 来自：git rev-list -n1 v0.1.0
+dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex commit>'
 ```
 
-等价写法：
+tag 形式（可安装，但 tag/branch spec 不参与自动更新）：
 
 ```powershell
-dsh plugin --profile <profile> add 'git+https://github.com/<OWNER>/paper-reader.git#v0.1.0'
+dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.1.0'
 ```
 
 - 建议用引号包住 spec，避免 PowerShell 把 `#` 当注释。
@@ -110,7 +113,7 @@ dsh plugin --profile <profile> add 'git+https://github.com/<OWNER>/paper-reader.
 ### 方式二：GitHub Release tarball（备选）
 
 ```powershell
-dsh plugin --profile <profile> add 'https://github.com/<OWNER>/paper-reader/releases/download/v0.1.0/paper-reader-0.1.0.tgz'
+dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader/releases/download/v0.1.0/dsh-paper-reader-0.1.0.tgz'
 ```
 
 > 注意：pnpm 11.0–11.8 配合 DSH profile 的 hoisted 布局安装裸 Release 资产 URL 时可能报 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`（11.9+ 正常）。优先用上面的 tag 安装。
@@ -122,15 +125,13 @@ dsh plugin --profile <profile> add 'https://github.com/<OWNER>/paper-reader/rele
 
 本地目录是链接安装：修改源码后需要重新构建并重新加载插件条目（关掉再打开该插件）。
 
-### 方式四：npm 包 `paper-reader`（计划中，尚未发布）
+### 方式四：npm 包（计划中，尚未发布）
 
-```powershell
-dsh plugin --profile <profile> add paper-reader   # 仅在 npm 发布后才可用
-```
-
-> 目前 npm 上还没有这个包；安装方式以 GitHub 的 tag 为准。`<OWNER>` 待填。
+unscoped `dsh-paper-reader` 已被他人占用（rantz 1.5.0），所以现在没有可以直接 `add` 的 npm 包。未来若发布 npm，会改用 scope 名（如 `@beiwei91/dsh-paper-reader`）或另选未占用名字；在此之前请用上面的 GitHub 方式安装。
 
 安装后：打开右侧栏 → 在引导页点「论文阅读器」卡片 → 打开「论文」标签页。
+
+> 上架插件市场（社区目录 / 自托管 format-1 index）：见 `docs/PUBLISHING.md` §16；PR 条目在 `market/beiwei91__dsh-paper-reader.yml`。
 
 ---
 
@@ -145,6 +146,8 @@ paper-reader/papers/<sha1>.pdf          论文字节（供 paper_* 工具读取�
 paper-reader/papers/<sha1>.text.json    逐页文本缓存（首次工具调用时生成）
 paper-reader/annotations/<sha1>.json    高亮与边注（{ key, highlights }）
 ```
+
+> 目录名沿用实现命名空间 `paper-reader`（历史原因），与包名/loader 名 `dsh-paper-reader` 无关。
 
 `<sha1>` 是论文 key 的 SHA-1：
 
@@ -233,4 +236,4 @@ Data lives under `$DSH_HOME/paper-reader/` (paper bytes, extracted-text cache, a
 
 **Known limitations:** scanned PDFs have no text layer (OCR is a work in progress — see the marked TODO above); cross-page selections are rejected; duplicated text on a page is highlighted at its first occurrence only; moving/renaming a local PDF detaches its annotations; a 32 MiB file cap; the first selection drag on a page builds its text layer and takes a moment.
 
-Install from the GitHub tag: `dsh plugin --profile <profile> add 'github:<OWNER>/paper-reader#v0.1.0'` (or the Release tarball URL); a local directory can be linked for development. An npm package `paper-reader` is planned, not published yet. Development: `pnpm install && pnpm build && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/<OWNER>/paper-reader` (owner placeholder — to be filled in before publication).
+Install from GitHub: `dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex commit>'` (pin the commit for updatable installs; `github:beiwei91/dsh-paper-reader#v0.1.0` also installs), or the Release tarball; a local directory can be linked for development. The package/loader name and the GitHub repository are both `dsh-paper-reader`. An npm release is not possible under this unscoped name (already taken); a scoped package may follow. Market listing: see `docs/PUBLISHING.md` §16. Development: `pnpm install && pnpm build && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/beiwei91/dsh-paper-reader`.

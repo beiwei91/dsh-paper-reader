@@ -1,0 +1,42 @@
+{
+  "format": 1,
+  "_note": "Self-hosted format-1 plugin index example (validated by @deepseek-ai/dsh-plugin-market-index). Replace 0000000000000000000000000000000000000000 with the 40-hex commit of the v0.1.0 tag (git rev-list -n1 v0.1.0) before serving this file; also refresh publishTimestamp. The _note key is ignored by the validator.",
+  "title": {
+    "en": "Paper Reader plugin index",
+    "zh": "论文阅读器插件索引"
+  },
+  "description": {
+    "en": "Format-1 index for the Paper Reader DSH plugin (GitHub-only distribution).",
+    "zh": "论文阅读器 DSH 插件的 format-1 索引（GitHub 分发）。"
+  },
+  "plugins": [
+    {
+      "name": "dsh-paper-reader",
+      "title": {
+        "en": "Paper Reader",
+        "zh": "论文阅读器"
+      },
+      "description": {
+        "en": "Read local PDFs and arXiv papers in the DSH right sidebar: outline, full-text search, highlights with notes, quote/explain/translate, and read-only paper_* agent tools.",
+        "zh": "在 DSH 右侧栏读本地 PDF 与 arXiv 论文：目录、全文搜索、高亮与边注、引用/解释/翻译，以及只读 paper_* agent 工具。"
+      },
+      "author": "beiwei91",
+      "homepage": "https://github.com/beiwei91/dsh-paper-reader",
+      "repository": {
+        "url": "https://github.com/beiwei91/dsh-paper-reader"
+      },
+      "icon": "https://raw.githubusercontent.com/beiwei91/dsh-paper-reader/v0.1.0/icon.svg",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794662000,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/beiwei91/dsh-paper-reader",
+            "commit": "0000000000000000000000000000000000000000"
+          }
+        }
+      ]
+    }
+  ]
+}

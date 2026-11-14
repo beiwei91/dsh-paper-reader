@@ -1,0 +1,41 @@
+# Candidate awesome-dsh-plugin catalog entry for Paper Reader.
+#
+# Intended path in the awesome-dsh-plugin repository (UNVERIFIED, confirm
+# against that repo's CONTRIBUTING/CI before opening the PR):
+#   data/plugins/beiwei91__dsh-paper-reader.yml
+#
+# Field meanings follow the runtime catalog schema used by dshmarket 1.73.19
+# (RegistryPlugin in dshmarket/lib/types/registry.d.ts): name, owner, url,
+# category, description, install, added, plus optional icon/tarball/screenshots.
+# The catalog is consumed from https://awesome-dsh-plugin.com/plugins.json.
+#
+# Before the PR:
+#   - replace `category` with an allowed id from the awesome repo's category list
+#     (the local enum is UNVERIFIED; `productivity` is a placeholder).
+#   - `install` is derived from the repo URL (below).
+#   - `added` = the date the entry is added.
+name: dsh-paper-reader
+owner: beiwei91
+url: https://github.com/beiwei91/dsh-paper-reader
+# UNVERIFIED enum: use the closest allowed category id from the awesome repo.
+category: productivity
+description:
+  en: >-
+    Paper Reader adds a Papers tab to the DSH right sidebar: read local PDFs and
+    arXiv papers with continuous scrolling, outline jumps, in-document search and
+    a remembered position; keep multi-colour highlights with margin notes; quote a
+    selection into the conversation or ask the agent to explain/translate it; four
+    read-only paper_* agent tools read the paper open in the session.
+  zh: >-
+    论文阅读器：在 DSH 右侧栏新增「论文」标签页，读本地 PDF 与 arXiv 论文（连续滚动、目录跳转、
+    全文搜索、记忆位置）；四色高亮与边注按论文保存；选中原文可引用到对话、让 agent 解释/翻译；
+    四个只读 paper_* 工具读取当前会话打开的论文。
+# GitHub-only release. dshmarket derives its install target from url
+# (no npm/tarball here -> github:beiwei91/dsh-paper-reader); the field below is
+# that derived value. A tag-pinned alternative is
+# git+https://github.com/beiwei91/dsh-paper-reader.git#v0.1.0
+install: "github:beiwei91/dsh-paper-reader"
+added: "2026-11-14"
+icon: https://raw.githubusercontent.com/beiwei91/dsh-paper-reader/v0.1.0/icon.svg
+# Optional screenshots (UNVERIFIED format): a screenshots.json beside the entry
+# listing 1-8 repository-relative image paths, e.g. ["docs/preview.svg", "..."].
