@@ -16,6 +16,7 @@
 ![论文阅读器示意（功能示意，非真实截图）](docs/preview.svg)
 
 - 运行环境：DSH **0.2.2-rc.3** 上开发与验证（`engines.dsh` 计划声明为 `>=0.2.2-rc.3 <0.3.0-0`，见 `docs/PUBLISHING.md`）。
+- 发布名：npm 包 **`dsh-papers`**；仓库 `https://github.com/<OWNER>/dsh-papers`（`<OWNER>` 为占位，发布前替换）。
 - 许可证：MIT；内置 PDF.js（Apache-2.0）的第三方许可见 `THIRD-PARTY-LICENSES.md`。
 
 ---
@@ -93,10 +94,10 @@
 
 本地目录是链接安装：修改源码后需要重新构建并重新加载插件条目（关掉再打开该插件）。
 
-### 方式二：npm 包（发布后可用）
+### 方式二：npm 包 `dsh-papers`（发布后可用）
 
 ```powershell
-dsh plugin --profile <profile> add dsh-paper-reader
+dsh plugin --profile <profile> add dsh-papers
 ```
 
 - 适用于 `web` 等由 CLI 管理的 profile；安装后 bundle 默认启用。
@@ -104,12 +105,12 @@ dsh plugin --profile <profile> add dsh-paper-reader
 - 也可从 GitHub Release 的预构建 tarball 安装（无需本地构建脚本）：
 
 ```powershell
-dsh plugin --profile <profile> add https://github.com/<OWNER>/dsh-paper-reader/releases/download/v0.1.0/dsh-paper-reader-0.1.0.tgz
+dsh plugin --profile <profile> add https://github.com/<OWNER>/dsh-papers/releases/download/v0.1.0/dsh-papers-0.1.0.tgz
 ```
 
 安装后：打开右侧栏 → 在引导页点「论文阅读器」卡片 → 打开「论文」标签页。
 
-> 发布包名与安装方式以 npm 上的实际包为准；`<OWNER>` 待填。
+> 发布包名 `dsh-papers`，安装方式以 npm 上的实际包为准；`<OWNER>` 待填。
 
 ---
 
@@ -135,7 +136,7 @@ paper-reader/annotations/<sha1>.json    高亮与边注（{ key, highlights }）
 
 ### 网络行为
 
-- **唯一的出站请求**：打开/搜索 arXiv 时，Host 端访问 `https://export.arxiv.org/api/query`（元数据/检索）与 `https://arxiv.org/pdf/<id>`（PDF 下载），请求带 `User-Agent: dsh-paper-reader/0.1`，超时 45 秒，PDF 上限 32 MiB。
+- **唯一的出站请求**：打开/搜索 arXiv 时，Host 端访问 `https://export.arxiv.org/api/query`（元数据/检索）与 `https://arxiv.org/pdf/<id>`（PDF 下载），请求带固定 `User-Agent`，超时 45 秒，PDF 上限 32 MiB。
 - 浏览器端只访问 DSH 同源的 `/paper-reader/api/*`，不加载 CDN、字体、统计脚本或任何第三方资源。
 - 本地 PDF 完全在本地处理；论文文件与标注不会上传到任何服务器。
 - `/paper-reader/api/*` 只接受回环地址（`127.0.0.1`/`localhost`/`[::1]`），写操作还要求同源 `Origin`；其它来源返回 403。
@@ -212,4 +213,4 @@ Data lives under `$DSH_HOME/paper-reader/` (paper bytes, extracted-text cache, a
 
 **Known limitations:** scanned PDFs have no text layer (OCR is a work in progress — see the marked TODO above); cross-page selections are rejected; duplicated text on a page is highlighted at its first occurrence only; moving/renaming a local PDF detaches its annotations; a 32 MiB file cap; the first selection drag on a page builds its text layer and takes a moment.
 
-Install (once published) with `dsh plugin --profile <profile> add dsh-paper-reader`, or point DSH at this directory for a linked local install. Development: `pnpm install && pnpm build && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/<OWNER>/dsh-paper-reader` (owner placeholder — to be filled in before publication).
+Install (once published) with `dsh plugin --profile <profile> add dsh-papers`, or point DSH at this directory for a linked local install. Development: `pnpm install && pnpm build && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/<OWNER>/dsh-papers` (owner placeholder — to be filled in before publication).

@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 dsh-paper-reader contributors
+Copyright (c) 2026 dsh-papers contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,5 +27,6 @@ This package bundles PDF.js (package `pdfjs-dist`, version 6.3.289), which is
 licensed under the Apache License, Version 2.0. PDF.js code is embedded in the
 generated `lib/host.js`, `client.pdf.js` and the copied `lib/pdf.worker.mjs`.
 The full Apache-2.0 license text and the required attribution / statement of
-modification are supplied in THIRD-PARTY-LICENSES.md, which must be included
-in the published package (`files`). See docs/PUBLISHING.md.
+modification are supplied verbatim in THIRD-PARTY-LICENSES.md at the repository
+root. That file must be listed in `files` when publishing; see
+docs/PUBLISHING.md.
