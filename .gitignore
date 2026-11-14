@@ -3,4 +3,5 @@ node_modules/
 .build/
 testdata/
 *.log
+*.tgz
 .DS_Store

@@ -8,10 +8,9 @@ GitHub 仓库：`https://github.com/beiwei91/dsh-paper-reader`（包名/loader �
 
 在 DeepSeek Harness（DSH）右侧栏新增一个「论文」标签页，把 PDF 论文当作可读、可标注、可对话的对象：**连续滚动阅读、目录跳转、全文搜索、记忆阅读位置；四色高亮 + 边注；选中原文可引用到对话、让 agent 解释或翻译**。也支持 arXiv 链接/ID 与关键词搜索直接打开论文；agent 通过四个**只读**工具（`paper_info`、`paper_outline`、`paper_read`、`paper_search`）读取当前会话里打开的那篇论文。
 
-> **状态**：本地 PDF、arXiv、阅读层、标注、对话动作、agent 工具均已完成。
-> **扫描版 PDF 的 OCR 尚未接入**（扫描页目前只显示页图，没有文本层，搜索/翻译/`paper_*` 工具无法读取其文字）。
+> **历史草稿说明**：本文件是根 `README.md` 的编辑底稿，写于扫描页 OCR 接入之前；**OCR 已实现**，对外描述以根 `README.md` 为准（安装、功能与已知限制均已更新）。
 >
-> <!-- TODO(OCR): 接入文本级 OCR 后，更新本节、功能列表与「已知限制」，并删除本 TODO 标记。 -->
+> **状态**：本地 PDF、arXiv、阅读层、标注、对话动作、agent 工具、扫描页文本级 OCR 均已完成。扫描页在阅读器空闲时后台识别，识别文本进入逐页文本缓存，可被页内搜索、翻译和 `paper_*` 工具使用；OCR 页不生成文本层，扫描页上不支持选中/高亮。
 
 ![论文阅读器示意（功能示意，非真实截图）](docs/preview.svg)
 
@@ -170,7 +169,7 @@ paper-reader/annotations/<sha1>.json    高亮与边注（{ key, highlights }）
 
 ## 已知限制
 
-- **OCR 未接入**：扫描版 PDF 只有页图，没有文本层，全文搜索/翻译/`paper_*` 都读不到内容。
+- **扫描页 OCR**：文本级、离线、尽力而为；OCR 页不能选中/高亮；每次最多排队当前页附近约 30 页，不会主动扫全篇；识别质量取决于扫描质量。
 - 首屏以第 1 页的尺寸占位；横向页在真正渲染前会有一次尺寸跳动。
 - 高亮锚定「页 + 文本片段」：**跨页选区会被拒绝**；同一页里完全重复的文本只会标记第一处；论文文件被移动/改名（本地路径 key 变化）后，旧标注不会自动跟随。
 - 文本层按需构建：有高亮或搜索命中的页、以及开始选择的页才会建文本层。在尚未建层的页面上第一次拖动选择，约一两百毫秒后工具条才出现（选区会自动补全，不需要重拖）；之后再选即时。
@@ -234,6 +233,6 @@ src/host/{arxiv,store,text,tools}.ts  arXiv 抓取、落盘、文本抽取、四
 
 Data lives under `$DSH_HOME/paper-reader/` (paper bytes, extracted-text cache, annotations), plus a small localStorage pointer for the open paper and reading position per tab. The only outbound network traffic is the Host fetching from arXiv (`export.arxiv.org`, `arxiv.org`); the browser talks only to the loopback-only, same-origin `/paper-reader/api/*` routes. No telemetry.
 
-**Known limitations:** scanned PDFs have no text layer (OCR is a work in progress — see the marked TODO above); cross-page selections are rejected; duplicated text on a page is highlighted at its first occurrence only; moving/renaming a local PDF detaches its annotations; a 32 MiB file cap; the first selection drag on a page builds its text layer and takes a moment.
+**Known limitations:** scanned pages get text-level offline OCR (text only, no selection/highlighting, ~30-page rolling queue); cross-page selections are rejected; duplicated text on a page is highlighted at its first occurrence only; moving/renaming a local PDF detaches its annotations; a 32 MiB file cap; the first selection drag on a page builds its text layer and takes a moment.
 
 Install from GitHub: `dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex commit>'` (pin the commit for updatable installs; `github:beiwei91/dsh-paper-reader#v0.1.0` also installs), or the Release tarball; a local directory can be linked for development. The package/loader name and the GitHub repository are both `dsh-paper-reader`. An npm release is not possible under this unscoped name (already taken); a scoped package may follow. Market listing: see `docs/PUBLISHING.md` §16. Development: `pnpm install && pnpm build && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/beiwei91/dsh-paper-reader`.

@@ -3,7 +3,7 @@
 本文是发布准备产物，**不执行任何发布动作**：不创建 GitHub 仓库、不 `git push`、不 `npm publish`、不安装/卸载当前 profile 里的插件。
 
 核对时间：2026-11-14。核对基线：本地 `HEAD ≥ 533c6a7`；运行环境 DSH **0.2.2-rc.3**（Desktop，profile `desktop`，Electron `app.asar`）、pnpm 11.24.0、Node 24.16.0、`pdfjs-dist` 6.3.289。
-仓库根目录（本地）：`D:\CODE\dsh-paper-reader`。
+仓库根目录（本地）：`<repo>`（本文以 `<repo>`、`$DSH_HOME`、`<profile>` 等通用占位代替本机绝对路径）。
 
 ## 已决定的发布方式（2026-11-14）
 
@@ -52,17 +52,17 @@
 | 运行时验证 | 仅做过 typecheck / pack dry-run | 发布前按 §14 在真实 DSH 里装一次 GitHub tag（或本地目录）走查。 |
 | 图标/示意图授权 | `icon.svg`、`docs/preview.svg` 为仓库内文件 | 所有者确认可再分发（`host-plugin.md` 的显示资源要求）。 |
 | `testdata/attention.pdf`（2.2 MB） | 已被 `.gitignore` 忽略、未跟踪 | 保持不提交（论文 PDF 不应再分发）。 |
-| `.gitignore` 未忽略 `*.tgz` | `pnpm pack` 会在仓库根生成 tarball | 建议补 `*.tgz`（不在本次写入范围内）。 |
+| `.gitignore` 与 `*.tgz` | `pnpm pack` 会在仓库根生成 tarball | **已补 `*.tgz`**（2026-11-14）：`pnpm pack` 产物不会再被误提交。 |
 | `@esbuild/win32-x64` | 只在 Windows 上验证过构建 | 不随 npm 包分发；GitHub 用户只下载已提交的构建产物，不需要本地构建。 |
 | secret 扫描 | 无 `.env`/token/密钥 | 发布前再跑一次 `git status` 与 `git log --stat` 确认没带本地文件。 |
 
-`git remote -v` 为空（尚未关联远端）；`git status` 里除本文件改动外，`.analysis/` 是其他 agent 的未跟踪目录，不要提交。
+`git remote -v` 为空（尚未关联远端）；`git status` 里的其它未跟踪文件（本地分析目录等）不要提交。
 
 ---
 
 ## 1. 已验证的发布规则与来源
 
-结论读自本机安装的 DSH 0.2.2-rc.3；路径前缀 `<dsh> = D:\Program Files\dsh\resources\app.asar\dsh\node_modules`。
+结论读自本机安装的 DSH 0.2.2-rc.3；路径前缀 `<dsh> = <DSH install>/resources/app.asar/dsh/node_modules`。
 
 | 规则 | 来源（路径 · 章节） |
 |---|---|
@@ -85,7 +85,7 @@
 | DSH Discover / `plugin_market` 读取用户配置的 format-1 index（`indexes`），安装仍走 `pluginManager.installBundle` | `<dsh>/@deepseek-ai/dsh-plugin-market/README.md` · “Use this package” |
 | 已知风险：pnpm 11.0–11.8 + hoisted linker（DSH profile 默认）对“裸 GitHub Release 资产 URL”不记录 integrity，会报 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`；11.9+ 可用 | `<profile>/node_modules/dshmarket/lib/types/sources.d.ts`（`sourceFallbackFor` 注释；第三方包内的实测说明，标为注意项而非 DSH 官方文档） |
 
-> `…/references/…` 指 `<dsh>/@deepseek-ai/dsh-agent-preset/skills/dsh-doc/references/`；`<profile>` 指 `C:\Users\gzy\.dsh\profiles\desktop`。
+> `…/references/…` 指 `<dsh>/@deepseek-ai/dsh-agent-preset/skills/dsh-doc/references/`；`<profile>` 指 profile 目录（`$DSH_HOME/profiles/<profile>`，本例为 `desktop`）。
 
 ---
 
@@ -189,7 +189,7 @@ GitHub-only 安装直接使用仓库里的文件，所以“提交构建产物�
 | `client.js`、`client.pdf.js`、`lib/host.js`、`lib/pdf.worker.mjs` | **构建产物（提交）** | 每次发布前 `pnpm build`，review diff 后提交；`.gitattributes` 已标记 generated |
 | `.build/` | 生成物（忽略） | 不提交 |
 | `node_modules/`、`.pnpm-store/`、`testdata/`、`*.log` | 本地/测试数据（忽略） | 不提交 |
-| `*.tgz` | `pnpm pack` 产物 | 不提交（建议补进 `.gitignore`） |
+| `*.tgz` | `pnpm pack` 产物 | 不提交（`.gitignore` 的 `*.tgz` 已忽略） |
 
 发布前固定动作：
 
@@ -197,7 +197,7 @@ GitHub-only 安装直接使用仓库里的文件，所以“提交构建产物�
 pnpm install
 pnpm typecheck
 pnpm build
-git status --short      # 只应看到预期改动；.analysis/ 等其它 agent 的文件不要提交
+git status --short      # 只应看到预期改动；其它未跟踪文件（本地分析目录等）不要提交
 git diff --stat -- client.js client.pdf.js lib/
 ```
 
@@ -209,11 +209,12 @@ git diff --stat -- client.js client.pdf.js lib/
 
 - **实测现状（2026-11-14，`files` 精确化后）**：`pnpm pack --dry-run` 输出 **21** 个文件（`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`、`lib/host.js`、`lib/ocr/engine.cjs`、`lib/ocr/engine-impl.cjs`、`lib/ocr/worker.cjs`、`lib/ocr/tesseract-core-lstm.wasm`、`lib/ocr/tesseract-core-simd-lstm.wasm`、`lib/ocr/lang/eng.traineddata.gz`、`lib/ocr/lang/chi_sim.traineddata.gz`、`lib/pdf.worker.mjs`、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`、`THIRD-PARTY-LICENSES.md`）；tarball 名 `dsh-paper-reader-0.1.0.tgz`（实测 **8,227,726 B ≈ 7.85 MiB**，`tar -tzf` 数得 21 个 entry）。
 - **`files` 已精确化**（2026-11-14 的打包修正 commit）：`"docs"` → `"docs/DETAIL.md"` + `"docs/preview.svg"`，并显式加入 `"THIRD-PARTY-LICENSES.md"`。因此内部发布文档（`docs/PUBLISHING.md`、`docs/README.draft.md`、`docs/OCR-VERIFICATION.md`）**不再进包**，而 `THIRD-PARTY-LICENSES.md` **会**进包（`LICENSE` 仍由 npm 按惯例自动带）。包内**没有** `src/**`、`.github/**`、`scripts/**`、`market/**`、`.build/**`、`build.mjs`、`tsconfig.json`、lockfile、`testdata/**`。
-- **仍留在仓库、但不进包**：`docs/OCR-VERIFICATION.md`、`docs/PUBLISHING.md`、`docs/README.draft.md` 仍是仓库文件，GitHub 源码归档会包含它们。若希望公开仓库/源码归档也不含内部文档，应把 `docs/OCR-VERIFICATION.md` 移出仓库或删除（待人工决定，见 §15）。
+- **`files` 里的 `"client.*.js"` 是宽通配**：它目前只匹配 `client.pdf.js`（`client.js` 由前面的精确项覆盖）；将来若新增 `client.<name>.js`，会被**无提示**一并打进包。这是有意保留的便利，风险可接受；新增客户端产物时要复核 `pnpm pack --dry-run` 清单。
+- **仍留在仓库、但不进包**：`docs/OCR-VERIFICATION.md`、`docs/PUBLISHING.md`、`docs/README.draft.md` 仍是仓库文件，GitHub 源码归档会包含它们。**已决定保留在公开仓库**（理由与要求见 §15.1）。
 - **对 GitHub-only 的影响**：tarball 现在既含 `THIRD-PARTY-LICENSES.md`（许可证合规）又不含内部文档，**可以直接作为 Release 资产**；GitHub 自动生成的源码归档（`tar.gz`/`zip`，含仓库全部 tracked 文件）同样可用。
 - npm 发布日目标清单：与上面的实测清单完全一致（21 项；`lib/ocr/**` 为 7 个文件：`engine.cjs`/`engine-impl.cjs`/`worker.cjs` + 2 个 WASM core + 2 个语言包）。`files` 已是最终形态，npm 日只需叠加 §3 diff 里剩余的 `engines`/`publishConfig`/`description`/`exports` 项。
 - 体积（实测，`files` 精确化后）：`client.pdf.js` 1,735,431 B + `lib/pdf.worker.mjs` 2,395,538 B + `lib/host.js` 1,058,698 B + `client.js` 32,407 B ≈ 5.0 MiB（未压缩）；`lib/ocr/**` 另 11,281,627 B ≈ 10.8 MiB；tarball 实测 8,227,726 B ≈ 7.85 MiB。
-- 如要检查真实 tarball（会写文件）：`pnpm pack` 后 `tar -tzf dsh-paper-reader-0.1.0.tgz`，检查完删除、不要提交（`.gitignore` 目前未忽略 `*.tgz`）。
+- 如要检查真实 tarball（会写文件）：`pnpm pack` 后 `tar -tzf dsh-paper-reader-0.1.0.tgz`，检查完删除、不要提交（`*.tgz` 已被 `.gitignore` 忽略，仍不要提交）。
 
 ---
 
@@ -423,7 +424,7 @@ dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader
 pnpm install
 pnpm typecheck
 pnpm build
-git status --short         # 不要提交 .analysis/ 等其它 agent 的文件
+git status --short         # 不要提交其它未跟踪文件（本地分析目录等）
 git diff --stat -- client.js client.pdf.js lib/
 # 确认 client.js 第 2 行 id 已是 dsh-paper-reader
 pnpm pack --dry-run        # 可选：检查 Release 资产内容（见 §5 注意事项）
@@ -476,7 +477,11 @@ git push origin v0.1.0
 5. **版权署名**：`LICENSE` 当前写 “dsh-paper-reader contributors”；是否换成个人/组织名。
 6. **社区上架**：是否向 awesome-dsh-plugin 提 git-only entry、是否自建 format-1 index（§10）。
 7. **未来 npm**：是否注册免费账号走 §12；若做，发布日决定最终 npm 名（scoped `@beiwei91/dsh-paper-reader` 或另选 free 名）——unscoped `dsh-paper-reader` 已被占用。
-8. **内部文档是否移出仓库**：`docs/PUBLISHING.md`、`docs/README.draft.md`、`docs/OCR-VERIFICATION.md` 已不再进 npm 包，但仍留在仓库里（GitHub 源码归档会包含）。是否把 `docs/OCR-VERIFICATION.md` 等内部文档移出仓库或删除。
+8. **内部文档是否移出仓库**：**已决定保留**（见 §15.1）。
+
+### 15.1 内部文档保留决定（2026-11-14）
+
+决定：**`docs/PUBLISHING.md`、`docs/README.draft.md`、`docs/OCR-VERIFICATION.md` 继续保留在公开仓库中**，不移出、不删除。理由：三者都是维护者文档——`PUBLISHING.md` 是发布清单，`OCR-VERIFICATION.md` 记录 OCR 的设计、复现命令与实测数据，`README.draft.md` 是 README 的编辑底稿；源码归档本来就是给愿意读构建/发布细节的人看的，公开它们比让发布流程只存在于作者本机更透明。前提与要求：这些文档**不得包含任何密钥、凭据、本机绝对路径、用户名或私人邮箱**（2026-11-14 已做一轮清理，通用占位用 `<repo>`、`$DSH_HOME`、`<profile>` 等）；它们已不随 npm 包 / Release tarball 分发，所以普通用户看不到；若将来某篇文档开始包含敏感运营信息，再单独移出仓库。
 
 ---
 
@@ -568,8 +573,8 @@ agent 用 `plugin_manager` → `install_bundle`，target 填同一 spec。
 
 ## 17. 本次核对用到的证据
 
-- `pnpm pack --dry-run`（核对时为 15 文件；改名 + OCR 后为 23 文件，内部 docs 会进包、`THIRD-PARTY-LICENSES.md` 未进包；`files` 精确化后为 **21 文件**，内部 docs 已不进包、`THIRD-PARTY-LICENSES.md` 已进包，真实 tarball 8,227,726 B ≈ 7.85 MiB——见 §5）。
-- `pnpm typecheck`（通过）。
+- `pnpm pack --dry-run`（核对时为 15 文件；改名 + OCR 后为 23 文件，内部 docs 会进包、`THIRD-PARTY-LICENSES.md` 未进包；`files` 精确化后为 **21 文件**，内部 docs 已不进包、`THIRD-PARTY-LICENSES.md` 已进包，真实 tarball 8,227,726 B ≈ 7.85 MiB——见 §5）。2026-11-14 的成品 API 清理（README 重写 + 文档去本机路径）后复核仍为 **21 文件**：README 内容变化不改变打包清单。
+- `pnpm typecheck`（通过）；成品清理未改 `src/**`，`node build.mjs` 无需重跑。
 - `pnpm view dsh-paper-reader --json --registry https://registry.npmjs.org/`（**已被占用**，v1.5.0，另一项目 rantz）。
 - `pnpm view paper-reader version --registry https://registry.npmjs.org/` → 404（2026-11-14；仅作未来 npm 备选名记录，本轮不使用）。
 - `pnpm view dsh-papers / dsh-pdf-reader / dsh-paper-tab / dsh-sidebar-paper-reader version`（404 未采用 / 0.2.0 已占 / 404 / 404）。
@@ -579,4 +584,4 @@ agent 用 `plugin_manager` → `install_bundle`，target 填同一 spec。
 - `market/index.json` 按 `parseMarketIndex` 规则人工校验：`format=1`、`title.en`、合法包名、精确 SemVer、`publishTimestamp` 整数、git source `url` 为 canonical https 且 `commit` 为 40 位小写 hex。
 - 已读源码：`src/client/**`、`src/host/**`、`locale/*.json`、`cordis.patch.yml`、`build.mjs`、`package.json`、`.gitignore`、`.npmrc`、`pnpm-workspace.yaml`、`README.md`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`；`node_modules/pdfjs-dist/package.json` + `LICENSE`（生成 `THIRD-PARTY-LICENSES.md` 时逐字复制，177 行）。
 - 已读 DSH 文档：见 §1 表格（本机 `@deepseek-ai/dsh@0.2.2-rc.3` 安装内文档）。
-- 已读 profile 状态：`C:\Users\gzy\.dsh\profiles\desktop\package.json`（含 `link:D:/CODE/dsh-paper-reader`）、`cordis.patch.yml`、`node_modules/@local/dsh-paper-reader` junction；`dshmarket@1.73.19` 的 README、`lib/types/registry.d.ts`、`lib/sources.js`、`lib/types/sources.d.ts`；`.dsh-market/` 只读缓存。
+- 已读 profile 状态：`$DSH_HOME/profiles/<profile>/package.json`（含 `link:<repo>`）、`cordis.patch.yml`、`node_modules/@local/dsh-paper-reader` junction；`dshmarket@1.73.19` 的 README、`lib/types/registry.d.ts`、`lib/sources.js`、`lib/types/sources.d.ts`；`.dsh-market/` 只读缓存。
