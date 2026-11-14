@@ -19,7 +19,6 @@ export type PaperReaderLocaleKey =
   | 'title'
   | 'guideTitle'
   | 'guideDescription'
-  | 'skeleton'
   | 'emptyTitle'
   | 'emptyHint'
   | 'pathPlaceholder'
@@ -42,7 +41,18 @@ export type PaperReaderLocaleKey =
   | 'zoomIn'
   | 'zoomOut'
   | 'fitWidth'
-  | 'pageOf'
+  | 'highlight'
+  | 'quoteAction'
+  | 'explain'
+  | 'translate'
+  | 'copy'
+  | 'notes'
+  | 'notesEmpty'
+  | 'notePlaceholder'
+  | 'noteSave'
+  | 'noteDelete'
+  | 'explainPrompt'
+  | 'translatePrompt'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {

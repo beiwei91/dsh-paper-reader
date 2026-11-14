@@ -4,23 +4,35 @@
  */
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type { WorkspaceByteReadOptions, WorkspaceFileBytes } from '@deepseek-ai/dsh-api-workspace-files/types'
+import type { InputActions } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { Highlight, HighlightColor } from './annotations.ts'
 import type { PaperReaderLocaleKey } from './types.ts'
 
 /** Props the reader chunk's exported viewer takes. */
 export interface PdfViewerProps {
   /** Complete PDF bytes; the viewer copies them before transferring to the PDF worker. */
   bytes: Uint8Array<ArrayBuffer>
-  /** Stable key for the remembered reading position (absolute path or dropped-file identity). */
+  /** Stable key for the remembered reading position and the annotation file. */
   storageKey: string
   /** The plugin's copy function, so the chunk needs no locale service of its own. */
   t: (key: PaperReaderLocaleKey) => string
+  /** Every stored highlight of this paper; the viewer paints the ones on screen. */
+  highlights: readonly Highlight[]
+  onCreateHighlight(input: { page: number; color: HighlightColor; quote: string }): void
+  onUpdateNote(id: string, note: string): void
+  onDeleteHighlight(id: string): void
+  /** Put a selection into the conversation composer as a quote. */
+  onQuote(text: string, page: number): void
+  /** Quote a selection and ask the agent about it. */
+  onAsk(text: string, page: number, kind: 'explain' | 'translate'): void
 }
 
-/** Props the tab body receives: the two injected faces plus the standard Session prop. */
+/** Props the tab body receives: the injected face, the copy, and the standard Session props. */
 export interface PapersBodyProps {
   readonly reader: PaperReader
   readonly t: (key: PaperReaderLocaleKey) => string
+  readonly inputActions?: InputActions
   readonly sessionId?: string
 }
 

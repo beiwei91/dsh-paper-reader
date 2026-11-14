@@ -3,19 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./lib/host.js",
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "description": "论文阅读器：在 DSH 右侧栏阅读 PDF 论文（目录、页内搜索、高亮边注、agent 只读工具）",
   "exports": {
-    ".": "./index.js",
+    ".": "./lib/host.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
-    "index.js",
+    "lib/host.js",
     "client.js",
     "client.*.js",
     "cordis.patch.yml",
@@ -39,15 +40,20 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.3",
     "@deepseek-ai/dsh-api-gateway": "0.2.2-rc.3",
     "@deepseek-ai/dsh-api-remotes": "0.2.2-rc.3",
     "@deepseek-ai/dsh-api-workspace-files": "0.2.2-rc.3",
     "@deepseek-ai/dsh-client-locale": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.2.2-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "0.2.2-rc.3",
     "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.2-rc.3",
     "@deepseek-ai/dsh-client-ui-slots": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.3",
     "@deepseek-ai/dsh-session": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
     "@esbuild/win32-x64": "0.25.12",
+    "@types/node": "^22.20.5",
     "@types/react": "^18.3.12",
     "esbuild": "0.25.12",
     "pdfjs-dist": "6.3.289",

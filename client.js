@@ -29,10 +29,118 @@ __export(index_exports, {
   inject: () => inject
 });
 module.exports = __toCommonJS(index_exports);
-var import_react2 = require("react");
+var import_react3 = require("react");
 
 // src/client/PapersBody.tsx
+var import_react2 = require("react");
+
+// src/client/annotations.ts
 var import_react = require("react");
+var API = "/paper-reader/api/annotations";
+var SAVE_DELAY_MS = 300;
+var RETRY_DELAY_MS = 2e3;
+function newId() {
+  return globalThis.crypto?.randomUUID?.() ?? `hl-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+function putAnnotations(write, keepalive = false) {
+  return fetch(API, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: write.key, highlights: write.highlights }),
+    keepalive
+  }).then((response) => response.ok).catch((error) => {
+    console.warn("[paper-reader] annotation save failed", error);
+    return false;
+  });
+}
+function useAnnotations(storageKey) {
+  const [highlights, setHighlights] = (0, import_react.useState)([]);
+  const current = (0, import_react.useRef)([]);
+  const keyRef = (0, import_react.useRef)(storageKey);
+  const saveTimer = (0, import_react.useRef)(null);
+  const pending = (0, import_react.useRef)(null);
+  const dirty = (0, import_react.useRef)(false);
+  const flush = (0, import_react.useCallback)((keepalive = false) => {
+    const write = pending.current;
+    pending.current = null;
+    if (write === null) return;
+    void putAnnotations(write, keepalive).then((ok) => {
+      if (ok) {
+        dirty.current = false;
+        return;
+      }
+      if (pending.current === null) pending.current = write;
+      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(() => flush(false), RETRY_DELAY_MS);
+    });
+  }, []);
+  (0, import_react.useEffect)(() => {
+    flush(true);
+    keyRef.current = storageKey;
+    current.current = [];
+    setHighlights([]);
+    dirty.current = false;
+    if (storageKey === null || storageKey === "") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`${API}?key=${encodeURIComponent(storageKey)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const body = await response.json();
+        if (cancelled || keyRef.current !== storageKey) return;
+        const stored = Array.isArray(body.highlights) ? body.highlights : [];
+        if (dirty.current) {
+          current.current = [...stored.filter((item) => !current.current.some((local) => local.id === item.id)), ...current.current];
+          setHighlights(current.current);
+          pending.current = { key: storageKey, highlights: current.current };
+          flush();
+          return;
+        }
+        current.current = stored;
+        setHighlights(stored);
+      } catch (error) {
+        if (!cancelled) console.warn("[paper-reader] annotations unavailable", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [flush, storageKey]);
+  (0, import_react.useEffect)(() => () => {
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    const write = pending.current;
+    if (write !== null) void putAnnotations(write, true);
+  }, []);
+  const commit = (0, import_react.useCallback)((next) => {
+    current.current = next;
+    setHighlights(next);
+    const key = keyRef.current;
+    if (key === null || key === "") return;
+    dirty.current = true;
+    pending.current = { key, highlights: next };
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => flush(), SAVE_DELAY_MS);
+  }, [flush]);
+  const addHighlight = (0, import_react.useCallback)((input) => {
+    const quote = input.quote.trim();
+    if (quote === "") return;
+    commit([...current.current, {
+      id: newId(),
+      page: input.page,
+      color: input.color,
+      quote,
+      note: "",
+      createdAt: Date.now()
+    }]);
+  }, [commit]);
+  const updateNote = (0, import_react.useCallback)((id, note) => {
+    commit(current.current.map((highlight) => highlight.id === id ? { ...highlight, note } : highlight));
+  }, [commit]);
+  const removeHighlight = (0, import_react.useCallback)((id) => {
+    commit(current.current.filter((highlight) => highlight.id !== id));
+  }, [commit]);
+  return { highlights, addHighlight, updateNote, removeHighlight };
+}
 
 // src/client/pdf/styles.ts
 var BODY_CSS = `
@@ -42,6 +150,8 @@ var BODY_CSS = `
 .pr-empty-hint{font-size:12px;line-height:1.6;color:var(--dsw-alias-label-secondary,#57606a)}
 .pr-empty-foot{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b949e)}
 .pr-form{display:flex;gap:6px;width:100%;max-width:420px}
+.pr-input{flex:1 1 auto;min-width:0;border:1px solid var(--dsw-alias-border-primary,rgba(0,0,0,.16));border-radius:6px;padding:3px 7px;font:inherit;font-size:12px;background:var(--dsw-alias-bg-primary,#fff);color:inherit;outline:none}
+.pr-input:focus{border-color:var(--dsw-focus-ring-color,#3b82f6)}
 .pr-form .pr-input{flex:1 1 auto}
 .pr-open-btn{border:1px solid var(--dsw-alias-border-primary,rgba(0,0,0,.16));background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.05));color:inherit;border-radius:6px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
 .pr-open-btn:disabled{opacity:.5;cursor:default}
@@ -64,24 +174,31 @@ function baseName(path) {
 }
 var chunkPromise = null;
 function loadViewer() {
-  chunkPromise ??= __dshRequireAsync("./client.pdf.js");
+  chunkPromise ??= __dshRequireAsync("./client.pdf.js").then((module2) => module2).catch((error) => {
+    chunkPromise = null;
+    throw error;
+  });
   return chunkPromise;
 }
-function PapersBody({ reader, t, sessionId }) {
-  const [paper, setPaper] = (0, import_react.useState)(null);
-  const [viewer, setViewer] = (0, import_react.useState)(null);
-  const [pathInput, setPathInput] = (0, import_react.useState)("");
-  const [error, setError] = (0, import_react.useState)(null);
-  const [busy, setBusy] = (0, import_react.useState)(false);
-  const [dropping, setDropping] = (0, import_react.useState)(false);
-  const alive = (0, import_react.useRef)(true);
-  (0, import_react.useEffect)(() => {
+var MAX_FILE_BYTES = 32 * 1024 * 1024;
+function PapersBody({ reader, t, inputActions, sessionId }) {
+  const [paper, setPaper] = (0, import_react2.useState)(null);
+  const [viewer, setViewer] = (0, import_react2.useState)(null);
+  const [pathInput, setPathInput] = (0, import_react2.useState)("");
+  const [error, setError] = (0, import_react2.useState)(null);
+  const [busy, setBusy] = (0, import_react2.useState)(false);
+  const [dropping, setDropping] = (0, import_react2.useState)(false);
+  const alive = (0, import_react2.useRef)(true);
+  const abortRef = (0, import_react2.useRef)(null);
+  const annotations = useAnnotations(paper?.storageKey ?? null);
+  (0, import_react2.useEffect)(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      abortRef.current?.abort();
     };
   }, []);
-  (0, import_react.useEffect)(() => {
+  (0, import_react2.useEffect)(() => {
     let cancelled = false;
     void loadViewer().then((module2) => {
       if (!cancelled) setViewer(() => module2.PdfViewer);
@@ -92,7 +209,7 @@ function PapersBody({ reader, t, sessionId }) {
       cancelled = true;
     };
   }, []);
-  const openPath = (0, import_react.useCallback)(async () => {
+  const openPath = (0, import_react2.useCallback)(async () => {
     const path = pathInput.trim();
     if (path === "") return;
     if (sessionId === void 0 || sessionId === "") {
@@ -101,8 +218,11 @@ function PapersBody({ reader, t, sessionId }) {
     }
     setBusy(true);
     setError(null);
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const result = await reader.readBytes(sessionId, path, {});
+      const result = await reader.readBytes(sessionId, path, {}, controller.signal);
       if (!result.ok) {
         setError(errorLine(result.error.code, t));
         return;
@@ -116,48 +236,100 @@ function PapersBody({ reader, t, sessionId }) {
       if (alive.current) setBusy(false);
     }
   }, [pathInput, reader, sessionId, t]);
-  const openFile = (0, import_react.useCallback)(async (file) => {
+  const openFile = (0, import_react2.useCallback)(async (file) => {
     if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
       setError(t("errorOpen"));
       return;
     }
+    if (file.size > MAX_FILE_BYTES) {
+      setError(t("errorTooLarge"));
+      return;
+    }
     setError(null);
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    if (!alive.current) return;
-    setPaper({ name: file.name, storageKey: `drop:${file.name}:${file.size}`, bytes });
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!alive.current) return;
+      setPaper({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes });
+    } catch (reason) {
+      if (alive.current) setError(reason instanceof Error ? reason.message : String(reason));
+    }
   }, [t]);
-  const onDragOver = (0, import_react.useCallback)((event) => {
+  const onDragOver = (0, import_react2.useCallback)((event) => {
     event.preventDefault();
     setDropping(true);
   }, []);
-  const onDragLeave = (0, import_react.useCallback)(() => setDropping(false), []);
-  const onDrop = (0, import_react.useCallback)((event) => {
+  const onDragLeave = (0, import_react2.useCallback)(() => setDropping(false), []);
+  const onDrop = (0, import_react2.useCallback)((event) => {
     event.preventDefault();
     setDropping(false);
     const file = event.dataTransfer?.files?.[0];
     if (file !== void 0) void openFile(file);
   }, [openFile]);
-  const reset = (0, import_react.useCallback)(() => {
+  const reset = (0, import_react2.useCallback)(() => {
     setPaper(null);
     setError(null);
     setPathInput("");
   }, []);
+  (0, import_react2.useEffect)(() => {
+    if (paper === null || sessionId === void 0 || sessionId === "") return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const query = `key=${encodeURIComponent(paper.storageKey)}&session=${encodeURIComponent(sessionId)}&title=${encodeURIComponent(paper.name)}`;
+        const response = await fetch(`/paper-reader/api/paper?${query}`, {
+          method: "POST",
+          headers: { "content-type": "application/pdf" },
+          body: paper.bytes,
+          signal: controller.signal
+        });
+        if (!response.ok) console.warn("[paper-reader] paper upload failed", response.status);
+      } catch (error2) {
+        if (!controller.signal.aborted) console.warn("[paper-reader] paper upload failed", error2);
+      }
+    })();
+    return () => controller.abort();
+  }, [paper, sessionId]);
+  const cite = (0, import_react2.useCallback)((text, page) => {
+    return `${text}
+
+\u2014 ${paper?.name ?? ""} p.${page}`;
+  }, [paper]);
+  const quote = (0, import_react2.useCallback)((text, page) => {
+    inputActions?.insertQuote(cite(text, page));
+  }, [cite, inputActions]);
+  const ask = (0, import_react2.useCallback)((text, page, kind) => {
+    if (inputActions === void 0) return;
+    if (!inputActions.insertQuote(cite(text, page))) return;
+    const span = inputActions.captureInsertion();
+    if (!inputActions.insertText(` ${kind === "explain" ? t("explainPrompt") : t("translatePrompt")}`, span)) return;
+    inputActions.submit();
+  }, [cite, inputActions, t]);
   if (paper !== null) {
-    return (0, import_react.createElement)(
+    return (0, import_react2.createElement)(
       "div",
       { className: "pr-body" },
-      (0, import_react.createElement)("style", null, BODY_CSS),
-      (0, import_react.createElement)(
+      (0, import_react2.createElement)("style", null, BODY_CSS),
+      (0, import_react2.createElement)(
         "div",
         { className: "pr-head" },
-        (0, import_react.createElement)("span", { className: "pr-name", title: paper.name }, paper.name),
-        (0, import_react.createElement)("button", { type: "button", className: "pr-open-btn", onClick: reset }, t("changePaper"))
+        (0, import_react2.createElement)("span", { className: "pr-name", title: paper.name }, paper.name),
+        (0, import_react2.createElement)("button", { type: "button", className: "pr-open-btn", onClick: reset }, t("changePaper"))
       ),
-      error !== null && (0, import_react.createElement)("div", { className: "pr-error" }, error),
-      viewer === null ? (0, import_react.createElement)("div", { className: "pr-status" }, t("loading")) : (0, import_react.createElement)(viewer, { bytes: paper.bytes, storageKey: paper.storageKey, t })
+      error !== null && (0, import_react2.createElement)("div", { className: "pr-error" }, error),
+      viewer === null ? (0, import_react2.createElement)("div", { className: "pr-status" }, t("loading")) : (0, import_react2.createElement)(viewer, {
+        bytes: paper.bytes,
+        storageKey: paper.storageKey,
+        t,
+        highlights: annotations.highlights,
+        onCreateHighlight: annotations.addHighlight,
+        onUpdateNote: annotations.updateNote,
+        onDeleteHighlight: annotations.removeHighlight,
+        onQuote: quote,
+        onAsk: ask
+      })
     );
   }
-  return (0, import_react.createElement)(
+  return (0, import_react2.createElement)(
     "div",
     {
       className: "pr-body",
@@ -165,13 +337,13 @@ function PapersBody({ reader, t, sessionId }) {
       onDragLeave,
       onDrop
     },
-    (0, import_react.createElement)("style", null, BODY_CSS),
-    (0, import_react.createElement)(
+    (0, import_react2.createElement)("style", null, BODY_CSS),
+    (0, import_react2.createElement)(
       "div",
       { className: "pr-empty" },
-      (0, import_react.createElement)("div", { className: "pr-empty-title" }, t("emptyTitle")),
-      (0, import_react.createElement)("div", { className: "pr-empty-hint" }, t("emptyHint")),
-      (0, import_react.createElement)(
+      (0, import_react2.createElement)("div", { className: "pr-empty-title" }, t("emptyTitle")),
+      (0, import_react2.createElement)("div", { className: "pr-empty-hint" }, t("emptyHint")),
+      (0, import_react2.createElement)(
         "form",
         {
           className: "pr-form",
@@ -180,21 +352,21 @@ function PapersBody({ reader, t, sessionId }) {
             void openPath();
           }
         },
-        (0, import_react.createElement)("input", {
+        (0, import_react2.createElement)("input", {
           className: "pr-input",
           value: pathInput,
           placeholder: t("pathPlaceholder"),
           spellCheck: false,
           onChange: (event) => setPathInput(event.currentTarget.value)
         }),
-        (0, import_react.createElement)("button", { type: "submit", className: "pr-open-btn", disabled: busy }, t("open"))
+        (0, import_react2.createElement)("button", { type: "submit", className: "pr-open-btn", disabled: busy }, t("open"))
       ),
-      (0, import_react.createElement)(
+      (0, import_react2.createElement)(
         "div",
         { className: "pr-drop", "data-active": dropping ? "true" : "false" },
-        (0, import_react.createElement)("div", { className: "pr-empty-foot" }, t("dropHint"))
+        (0, import_react2.createElement)("div", { className: "pr-empty-foot" }, t("dropHint"))
       ),
-      error !== null && (0, import_react.createElement)("div", { className: "pr-error" }, error)
+      error !== null && (0, import_react2.createElement)("div", { className: "pr-error" }, error)
     )
   );
 }
@@ -205,7 +377,6 @@ var zh = {
   title: "\u8BBA\u6587",
   guideTitle: "\u8BBA\u6587\u9605\u8BFB\u5668",
   guideDescription: "\u6253\u5F00\u672C\u5730 PDF \u6216 arXiv \u8BBA\u6587",
-  skeleton: "\u8BBA\u6587\u9605\u8BFB\u5668 \xB7 \u9AA8\u67B6\u5DF2\u5C31\u4F4D\uFF0C\u9605\u8BFB\u5C42\u5728\u4E0B\u4E00\u9636\u6BB5\u63A5\u5165",
   emptyTitle: "\u8FD8\u6CA1\u6709\u6253\u5F00\u8BBA\u6587",
   emptyHint: "\u628A PDF \u62D6\u5230\u8FD9\u91CC\uFF0C\u6216\u586B\u5199\u672C\u673A\u7EDD\u5BF9\u8DEF\u5F84",
   pathPlaceholder: "D:\\papers\\attention-is-all-you-need.pdf",
@@ -228,13 +399,23 @@ var zh = {
   zoomIn: "\u653E\u5927",
   zoomOut: "\u7F29\u5C0F",
   fitWidth: "\u9002\u5BBD",
-  pageOf: "\u9875"
+  highlight: "\u9AD8\u4EAE",
+  quoteAction: "\u5F15\u7528",
+  explain: "\u89E3\u91CA",
+  translate: "\u7FFB\u8BD1",
+  copy: "\u590D\u5236",
+  notes: "\u7B14\u8BB0",
+  notesEmpty: "\u8FD9\u7BC7\u8BBA\u6587\u8FD8\u6CA1\u6709\u9AD8\u4EAE\u6216\u7B14\u8BB0",
+  notePlaceholder: "\u5199\u70B9\u8FB9\u6CE8\u2026",
+  noteSave: "\u4FDD\u5B58",
+  noteDelete: "\u5220\u9664",
+  explainPrompt: "\u8BF7\u89E3\u91CA\u8FD9\u6BB5\u3002",
+  translatePrompt: "\u8BF7\u628A\u8FD9\u6BB5\u7FFB\u8BD1\u6210\u4E2D\u6587\u3002"
 };
 var en = {
   title: "Papers",
   guideTitle: "Paper Reader",
   guideDescription: "Open a local PDF or an arXiv paper",
-  skeleton: "Paper Reader \xB7 skeleton installed, the reading layer lands next",
   emptyTitle: "No paper open yet",
   emptyHint: "Drop a PDF here, or paste an absolute path",
   pathPlaceholder: "D:\\papers\\attention-is-all-you-need.pdf",
@@ -257,7 +438,18 @@ var en = {
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
   fitWidth: "Fit",
-  pageOf: "of"
+  highlight: "Highlight",
+  quoteAction: "Quote",
+  explain: "Explain",
+  translate: "Translate",
+  copy: "Copy",
+  notes: "Notes",
+  notesEmpty: "No highlights or notes in this paper yet",
+  notePlaceholder: "Write a margin note\u2026",
+  noteSave: "Save",
+  noteDelete: "Delete",
+  explainPrompt: "Explain this passage.",
+  translatePrompt: "Translate this passage into Chinese."
 };
 function registerPapersLocale(ctx) {
   const disposeZh = ctx.locale.register(LOCALE_NS, "zh", zh);
@@ -279,7 +471,7 @@ function apply(ctx) {
     readBytes: (sessionId, path, options, signal) => ctx.remote.workspaceFiles.readBytes(sessionId, path, options, signal)
   };
   function PapersTitle() {
-    return (0, import_react2.createElement)("span", null, t("title"));
+    return (0, import_react3.createElement)("span", null, t("title"));
   }
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: TAB_ID,

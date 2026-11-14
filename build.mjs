@@ -85,6 +85,23 @@ runEsbuild([
 ])
 await writeAtomic(CHUNK_FILE, wrap((await readFile(CHUNK_OUT, 'utf8')).trim(), CHUNK_FILE))
 
+// 3. The Host half: routes plus the read-only agent tools. PDF.js is bundled in
+// so the profile needs no runtime dependency for text extraction.
+const HOST_OUT = fileURLToPath(new URL('lib/host.js', import.meta.url))
+await mkdir(fileURLToPath(new URL('lib/', import.meta.url)), { recursive: true })
+runEsbuild([
+  fileURLToPath(new URL('src/host/index.ts', import.meta.url)),
+  '--bundle',
+  '--format=esm',
+  '--platform=node',
+  '--target=node20',
+  '--external:canvas',
+  '--external:@napi-rs/canvas',
+  `--outfile=${HOST_OUT}`,
+  '--log-level=warning',
+])
+console.log(`lib/host.js written (${((await readFile(HOST_OUT)).length / 1024).toFixed(1)} KiB)`)
+
 // 2. The always-loaded half.
 const MAIN_OUT = `${OUT_DIR}client.cjs`
 runEsbuild([
