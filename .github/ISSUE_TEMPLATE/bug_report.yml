@@ -1,0 +1,74 @@
+name: Bug report / 问题反馈
+description: Something in the Paper Reader tab or the paper_* tools does not work as documented. / 论文标签页或 paper_* 工具的行为与文档不符。
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先确认「已知限制」里没有同样的问题（README）。**不要上传受版权保护的论文 PDF**；需要样例时请用自己生成的 PDF 或公开许可的文件。
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH version / DSH 版本
+      description: Output of `dsh --version`, or the Desktop app version.
+      placeholder: "0.2.2-rc.3"
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Paper Reader version / 插件版本
+      description: npm package version, or the git commit for a local-directory install.
+      placeholder: "0.1.0 / commit 533c6a7"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method / 安装方式
+      options:
+        - DSH Desktop Plugins UI (local directory)
+        - DSH Desktop Plugins UI (registry package)
+        - "`dsh plugin --profile <profile> add ...`"
+        - "agent `plugin_manager` install_bundle"
+        - other / 其它
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / 操作系统
+      placeholder: "Windows 11 24H2 / macOS 15 / Ubuntu 24.04"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      placeholder: |
+        1. Open a paper via ...
+        2. Select text on page ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected / 期望
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual / 实际
+      description: Include the browser console error and the DSH terminal output if any. / 如果有控制台或 DSH 终端报错请一并贴出。
+    validations:
+      required: true
+  - type: textarea
+    id: paper
+    attributes:
+      label: Paper details / 论文信息
+      description: Source (local path type / arXiv ID), page count, scanned or text PDF. Do not attach the PDF. / 来源、页数、是否扫描版。不要附 PDF。
+    validations:
+      required: false

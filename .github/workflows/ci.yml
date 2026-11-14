@@ -1,0 +1,44 @@
+# Build smoke check only.
+#
+# This does NOT prove the plugin works inside DSH: the tab, PDF rendering,
+# sidebar restore and the paper_* tools can only be exercised in a running
+# Harness. It builds the committed artifacts and typechecks the sources.
+#
+# windows-latest: the current devDependencies pin the Windows esbuild binary
+# (@esbuild/win32-x64). Re-check the runner list if that pin is dropped.
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm build
+
+      # Fails when the committed bundles no longer match the sources.
+      - run: git diff --exit-code -- client.js client.pdf.js lib/

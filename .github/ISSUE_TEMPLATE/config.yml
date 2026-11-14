@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: DSH / DeepSeek Harness bugs
+    url: https://github.com/deepseek-ai/deepseek-harness/issues
+    about: Problems that reproduce without this plugin belong in the DSH repository. / 不装本插件也能复现的问题请提到 DSH 仓库。

@@ -1,0 +1,13 @@
+# Normalize tracked text to LF so the repo behaves the same on Windows and POSIX.
+* text=auto eol=lf
+
+# Build outputs committed on purpose (git installs and the npm tarball need
+# prebuilt artifacts; the package has no prepack/prepare script). Keep them out
+# of diffs and language stats; regenerate with `pnpm build`.
+client.js          linguist-generated=true
+client.pdf.js      linguist-generated=true
+lib/host.js        linguist-generated=true
+lib/pdf.worker.mjs linguist-generated=true
+
+# The feature illustration is an SVG document, not binary.
+*.svg text
