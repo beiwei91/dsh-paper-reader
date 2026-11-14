@@ -11,7 +11,7 @@ import type { Highlight, HighlightColor } from '../annotations.ts'
 import type { PdfViewerProps } from '../contract.ts'
 import { createOcrScheduler, type OcrProgress, type OcrScheduler } from '../ocr/queue.ts'
 import { pageTextLength, renderPagePng, type OcrDocument } from '../ocr/raster.ts'
-import { highlightIdsOf, paintHighlights } from './marks.ts'
+import { layoutHighlights, type PaintedHighlight } from './marks.ts'
 import { VIEWER_CSS } from './styles.ts'
 
 type PdfDoc = Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>
@@ -240,6 +240,10 @@ export function PdfViewer({
   const pageRefs = useRef<(HTMLDivElement | null)[]>([])
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([])
   const textRefs = useRef<(HTMLDivElement | null)[]>([])
+  /** Per-page overlay holding the painted highlight rectangles. */
+  const hlRefs = useRef<(HTMLDivElement | null)[]>([])
+  /** Painted highlight geometry per page, in page-local coordinates, for click hit-testing. */
+  const hitRects = useRef<Map<number, readonly PaintedHighlight[]>>(new Map())
   const docRef = useRef<PdfDoc | null>(null)
   const workerRef = useRef<PdfWorker | null>(null)
   const taskRef = useRef<{ destroy(): Promise<void> } | null>(null)
@@ -305,6 +309,43 @@ export function PdfViewer({
     }, 2400)
   }, [])
 
+  /**
+   * Recompute one page's highlight overlay from its built text layer.
+   *
+   * Painting is character-exact now: `layoutHighlights` turns each stored quote
+   * into a DOM Range and its client rects (one box per line), so a partial
+   * selection paints only the selected characters instead of the whole PDF.js
+   * text run. The geometry is kept per page for click hit-testing, because the
+   * overlay boxes themselves are `pointer-events: none`. Pages without a built
+   * layer are never measured here.
+   */
+  const paintPageHighlights = useCallback((pageNumber: number): void => {
+    const textEl = textRefs.current[pageNumber - 1]
+    const pageEl = pageRefs.current[pageNumber - 1]
+    const layer = hlRefs.current[pageNumber - 1]
+    if (textEl === null || textEl === undefined || pageEl === null || pageEl === undefined || layer === null || layer === undefined) return
+    const pageHighlights = highlightsRef.current.filter(highlight => highlight.page === pageNumber)
+    layer.replaceChildren()
+    if (pageHighlights.length === 0 || textEl.childElementCount === 0) {
+      hitRects.current.set(pageNumber, [])
+      return
+    }
+    const painted = layoutHighlights(textEl, pageEl, pageHighlights)
+    for (const highlight of painted) {
+      for (const box of highlight.rects) {
+        const rect = document.createElement('div')
+        rect.className = 'pr-hl-rect'
+        rect.setAttribute('data-color', highlight.color)
+        rect.style.left = `${box.x}px`
+        rect.style.top = `${box.y}px`
+        rect.style.width = `${box.w}px`
+        rect.style.height = `${box.h}px`
+        layer.append(rect)
+      }
+    }
+    hitRects.current.set(pageNumber, painted)
+  }, [])
+
   // A hidden tab stays mounted, so the open paper cannot disappear; only the
   // heavy PDF resources are dropped, and only once the tab has really been
   // hidden: the dock keeps hidden tabs in the DOM, which `getClientRects` (empty
@@ -332,15 +373,23 @@ export function PdfViewer({
     for (const element of textRefs.current) {
       if (element !== null && element !== undefined && element.childElementCount > 0) element.replaceChildren()
     }
+    for (const element of hlRefs.current) {
+      if (element !== null && element !== undefined && element.childElementCount > 0) element.replaceChildren()
+    }
+    hitRects.current.clear()
   }, [scale])
 
-  // Highlights are anchored to text runs, so every (re)built page repaints.
+  // Highlights are anchored to text runs, so every (re)built page repaints. The
+  // repaint only measures pages that are already built (never an off-screen
+  // page), and is driven by state changes, never by scrolling.
   useEffect(() => {
+    if (status !== 'ready') return
     for (let index = 0; index < textRefs.current.length; index += 1) {
-      const element = textRefs.current[index]
-      if (element !== null && element !== undefined) paintHighlights(element, index + 1, highlights)
+      const page = index + 1
+      if (!highlights.some(highlight => highlight.page === page)) continue
+      paintPageHighlights(page)
     }
-  }, [highlights, numPages, scale])
+  }, [highlights, numPages, paintPageHighlights, scale, status, visible])
 
   const cancelJob = useCallback((pageNumber: number): void => {
     jobs.current.get(pageNumber)?.cancel()
@@ -416,7 +465,7 @@ export function PdfViewer({
         if (cancelled || builtLayers.current.get(pageNumber) !== key) return
         textCache.current.set(pageNumber, content.items.map(item => ('str' in item ? item.str : '')).join(' '))
         markSpans(textEl, highlightRef.current)
-        paintHighlights(textEl, pageNumber, highlightsRef.current)
+        paintPageHighlights(pageNumber)
       } catch (error) {
         // A cancelled layer was already cleared, and a layer rebuilt at a newer
         // scale now owns this element: never wipe the replacement's spans.
@@ -431,7 +480,7 @@ export function PdfViewer({
     })()
     textJobs.current.set(pageNumber, job)
     return job.promise
-  }, [scale])
+  }, [paintPageHighlights, scale])
 
   /** Drop one far page's bitmap and text layer, cancelling whatever is still in flight. */
   const releasePage = useCallback((pageNumber: number): void => {
@@ -442,6 +491,9 @@ export function PdfViewer({
     builtLayers.current.delete(pageNumber)
     const textEl = textRefs.current[pageNumber - 1]
     if (textEl !== null && textEl !== undefined && textEl.childElementCount > 0) textEl.replaceChildren()
+    const layer = hlRefs.current[pageNumber - 1]
+    if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
+    hitRects.current.delete(pageNumber)
     const canvas = canvasRefs.current[pageNumber - 1]
     if (canvas !== null && canvas !== undefined && canvas.width > 1) {
       canvas.width = 0
@@ -538,6 +590,7 @@ export function PdfViewer({
     jobs.current.clear()
     builtLayers.current.clear()
     textCache.current.clear()
+    hitRects.current.clear()
     setStatus('loading')
     setFailure('')
     setOutline(null)
@@ -588,6 +641,10 @@ export function PdfViewer({
       for (const job of textJobs.current.values()) job.cancel()
       textJobs.current.clear()
       builtLayers.current.clear()
+      hitRects.current.clear()
+      for (const layer of hlRefs.current) {
+        if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
+      }
       docRef.current = null
       const task = taskRef.current
       taskRef.current = null
@@ -956,6 +1013,26 @@ export function PdfViewer({
     })
   }, [buildTextLayer, commitSelection])
 
+  /**
+   * The topmost painted highlight under a viewport point on one page. The
+   * overlay rectangles are `pointer-events: none` so text selection keeps
+   * working, hence this geometric hit test instead of an event target.
+   */
+  const highlightAt = useCallback((page: number, clientX: number, clientY: number): string | null => {
+    const painted = hitRects.current.get(page)
+    const pageEl = pageRefs.current[page - 1]
+    if (painted === undefined || pageEl === null || pageEl === undefined) return null
+    const pageRect = pageEl.getBoundingClientRect()
+    const x = clientX - pageRect.left
+    const y = clientY - pageRect.top
+    for (let index = painted.length - 1; index >= 0; index -= 1) {
+      for (const box of painted[index].rects) {
+        if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) return painted[index].id
+      }
+    }
+    return null
+  }, [])
+
   // A fresh selection wins; a plain click on a painted highlight opens its note.
   const onMouseUp = useCallback((event: { clientX: number; clientY: number; button: number; target: EventTarget | null }): void => {
     const started = gesture.current
@@ -966,8 +1043,9 @@ export function PdfViewer({
       return
     }
     setSelection(null)
-    const ids = highlightIdsOf(event.target)
-    if (ids.length === 0) {
+    const page = pageOfNode(event.target as Node | null, pageRefs.current)
+    const clickedId = page === null ? null : highlightAt(page, event.clientX, event.clientY)
+    if (clickedId === null) {
       // Nothing selected after a real drag means the layer was still being built
       // when the gesture began; replay it rather than failing silently.
       if (
@@ -980,7 +1058,7 @@ export function PdfViewer({
       }
       return
     }
-    const highlight = highlightsRef.current.find(candidate => candidate.id === ids[0])
+    const highlight = highlightsRef.current.find(candidate => candidate.id === clickedId)
     if (highlight === undefined) return
     const pane = scrollRef.current?.getBoundingClientRect()
     const left = pane?.left ?? 0
@@ -991,7 +1069,7 @@ export function PdfViewer({
       x: Math.max(8, Math.min(event.clientX, left + width - 240)),
       y: Math.max(8, event.clientY - 20),
     })
-  }, [commitSelection, replaySelection])
+  }, [commitSelection, highlightAt, replaySelection])
 
   const selectionAction = useCallback((action: 'quote' | 'explain' | 'translate' | 'copy'): void => {
     if (selection === null) return
@@ -1057,6 +1135,9 @@ export function PdfViewer({
       style: { width: `${size.w * scale}px`, height: `${size.h * scale}px` },
     },
       h('canvas', { className: 'pr-canvas', ref: (element: HTMLCanvasElement | null): void => { canvasRefs.current[index] = element } }),
+      // Character-exact highlight overlay: above the canvas, below the text
+      // layer, never interactive (click hit-testing uses the stored rects).
+      h('div', { className: 'pr-hl-layer', ref: (element: HTMLDivElement | null): void => { hlRefs.current[index] = element } }),
       h('div', { className: 'pr-text', ref: (element: HTMLDivElement | null): void => { textRefs.current[index] = element } }),
     )
   }), [numPages, scale, sizes])

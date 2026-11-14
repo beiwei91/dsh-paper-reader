@@ -19,10 +19,11 @@ export const VIEWER_CSS = `
 .pr-text .markedContent{display:contents}
 .pr-text ::selection{background:rgba(56,132,255,.32)}
 .pr-text .pr-hit{box-shadow:inset 0 -2px 0 rgba(255,176,0,.9);border-radius:2px}
-.pr-hl{background:rgba(255,214,0,.35);border-radius:2px}
-.pr-hl[data-color="green"]{background:rgba(56,200,120,.35)}
-.pr-hl[data-color="blue"]{background:rgba(80,150,255,.32)}
-.pr-hl[data-color="pink"]{background:rgba(255,120,180,.35)}
+.pr-hl-layer{position:absolute;inset:0;pointer-events:none;z-index:1;overflow:hidden}
+.pr-hl-rect{position:absolute;border-radius:2px;pointer-events:none;background:rgba(255,214,0,.35)}
+.pr-hl-rect[data-color="green"]{background:rgba(56,200,120,.35)}
+.pr-hl-rect[data-color="blue"]{background:rgba(80,150,255,.32)}
+.pr-hl-rect[data-color="pink"]{background:rgba(255,120,180,.35)}
 .pr-sel{position:fixed;z-index:60;display:flex;align-items:center;gap:2px;padding:3px 4px;border-radius:8px;background:var(--dsw-alias-bg-elevated,#fff);box-shadow:var(--dsw-shadow-lv2,0 8px 24px rgba(0,0,0,.2));transform:translate(-50%,-100%)}
 .pr-swatch{width:13px;height:13px;border-radius:50%;border:1px solid rgba(0,0,0,.25);cursor:pointer;padding:0}
 .pr-swatch[data-color="yellow"]{background:#ffd400}
