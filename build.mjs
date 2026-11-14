@@ -97,6 +97,9 @@ runEsbuild([
   '--target=node20',
   '--external:canvas',
   '--external:@napi-rs/canvas',
+  // The OCR engine is its own CommonJS artifact: it spawns a worker thread and
+  // locates its assets with `__dirname`, neither of which survives an ESM bundle.
+  '--external:./ocr/engine-impl.cjs',
   `--outfile=${HOST_OUT}`,
   '--log-level=warning',
 ])
@@ -106,6 +109,51 @@ await copyFile(
   fileURLToPath(new URL('lib/pdf.worker.mjs', import.meta.url)),
 )
 console.log('lib/pdf.worker.mjs copied')
+
+// 4. The OCR assets. tesseract.js, its WASM core and the language data are
+// build-time devDependencies; the files the runtime needs are vendored into
+// lib/ocr/ so the installed plugin needs no npm dependency and no network.
+// Only the LSTM-only core is shipped (the reader always uses LSTM_ONLY), with
+// the SIMD and scalar builds covering both kinds of CPU.
+const OCR_DIR = fileURLToPath(new URL('lib/ocr/', import.meta.url))
+const OCR_LANG_DIR = fileURLToPath(new URL('lib/ocr/lang/', import.meta.url))
+await mkdir(OCR_LANG_DIR, { recursive: true })
+runEsbuild([
+  fileURLToPath(new URL('src/host/ocr/engine-entry.cjs', import.meta.url)),
+  '--bundle',
+  '--format=cjs',
+  '--platform=node',
+  '--target=node20',
+  `--outfile=${OCR_DIR}engine.cjs`,
+  '--log-level=warning',
+])
+runEsbuild([
+  fileURLToPath(new URL('src/host/ocr/worker-entry.cjs', import.meta.url)),
+  '--bundle',
+  '--format=cjs',
+  '--platform=node',
+  '--target=node20',
+  `--outfile=${OCR_DIR}worker.cjs`,
+  '--log-level=warning',
+])
+await copyFile(fileURLToPath(new URL('src/host/ocr/engine-impl.cjs', import.meta.url)), fileURLToPath(new URL('lib/ocr/engine-impl.cjs', import.meta.url)))
+const OCR_COPIES = [
+  ['node_modules/tesseract.js-core/tesseract-core-simd-lstm.wasm', 'lib/ocr/tesseract-core-simd-lstm.wasm'],
+  ['node_modules/tesseract.js-core/tesseract-core-lstm.wasm', 'lib/ocr/tesseract-core-lstm.wasm'],
+  ['node_modules/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz', 'lib/ocr/lang/eng.traineddata.gz'],
+  ['node_modules/@tesseract.js-data/chi_sim/4.0.0_best_int/chi_sim.traineddata.gz', 'lib/ocr/lang/chi_sim.traineddata.gz'],
+]
+for (const [from, to] of OCR_COPIES) {
+  await copyFile(fileURLToPath(new URL(from, import.meta.url)), fileURLToPath(new URL(to, import.meta.url)))
+}
+for (const [, to] of OCR_COPIES) {
+  const size = (await readFile(fileURLToPath(new URL(to, import.meta.url)))).length
+  console.log(`${to} copied (${(size / 1024).toFixed(1)} KiB)`)
+}
+for (const name of ['engine.cjs', 'worker.cjs', 'engine-impl.cjs']) {
+  const size = (await readFile(fileURLToPath(new URL(`lib/ocr/${name}`, import.meta.url)))).length
+  console.log(`lib/ocr/${name} written (${(size / 1024).toFixed(1)} KiB)`)
+}
 
 // 2. The always-loaded half.
 const MAIN_OUT = `${OUT_DIR}client.cjs`

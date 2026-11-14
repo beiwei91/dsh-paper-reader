@@ -1,5 +1,8 @@
 # esbuild's postinstall only validates that its platform binary is resolvable;
 # this checkout pins @esbuild/win32-x64 directly instead, and the DSH file
 # sandbox refuses the piped-stdio spawn a lifecycle script needs.
+# tesseract.js's postinstall is only an OpenCollective banner (a remote telemetry
+# ping) that this plugin does not need; its build-time files ship in the package.
 allowBuilds:
   esbuild: false
+  tesseract.js: false

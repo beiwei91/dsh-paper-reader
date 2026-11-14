@@ -11,7 +11,9 @@
  */
 import { unlink } from 'node:fs/promises'
 import { ArxivRequestError, fetchArxivPaper, searchArxiv } from './arxiv.ts'
+import { disposeOcr, recognizePage } from './ocr/index.ts'
 import { annotationPath, paperPaths, readBytes, readJson, writeBytes, writeJson } from './store.ts'
+import { loadPaperText, mergeOcrPage, type PaperText } from './text.ts'
 import { createTools, type CurrentPaper } from './tools.ts'
 
 interface HostContext {
@@ -46,6 +48,8 @@ interface ServerResponseLike {
 const ROUTE = '/paper-reader/api'
 const JSON_BODY_LIMIT = 2 * 1024 * 1024
 const PDF_BODY_LIMIT = 32 * 1024 * 1024
+/** One rendered page image (PNG) from the reader's canvas. */
+const OCR_BODY_LIMIT = 8 * 1024 * 1024
 const COLORS = new Set(['yellow', 'green', 'blue', 'pink'])
 
 interface Highlight {
@@ -294,6 +298,84 @@ export function apply(ctx: HostContext): void {
           return
         }
 
+        if (request.method === 'GET' && url.pathname === `${ROUTE}/ocr`) {
+          const key = url.searchParams.get('key') ?? ''
+          if (key === '') {
+            sendJson(response, 400, { error: 'missing-key' })
+            return
+          }
+          // Cheap: only the existing cache, never an extraction. The reader asks
+          // once on open so cached OCR pages are searchable without re-OCR.
+          const cached = await readJson<PaperText>(paperPaths(key).text)
+          const pages = Array.isArray(cached?.pages) ? cached.pages : []
+          const done = Array.isArray(cached?.ocrPages) ? cached.ocrPages.filter(Number.isInteger) : []
+          sendJson(response, 200, {
+            key,
+            done,
+            pages: done.map(page => ({
+              page,
+              text: typeof pages[page - 1] === 'string' ? pages[page - 1] : '',
+            })),
+          })
+          return
+        }
+
+        if (request.method === 'POST' && url.pathname === `${ROUTE}/ocr`) {
+          if (!sameOrigin(request.headers)) {
+            sendJson(response, 403, { error: 'bad-origin' })
+            return
+          }
+          const key = url.searchParams.get('key') ?? ''
+          if (key === '') {
+            sendJson(response, 400, { error: 'missing-key' })
+            return
+          }
+          const page = Number(url.searchParams.get('page') ?? '')
+          if (!Number.isInteger(page) || page < 1 || page > 100_000) {
+            sendJson(response, 400, { error: 'bad-page' })
+            return
+          }
+          const cached = await readJson<PaperText>(paperPaths(key).text)
+          if (Array.isArray(cached?.ocrPages) && cached.ocrPages.includes(page)) {
+            // Reopening a paper must never re-run OCR on a page already done.
+            const text = typeof cached.pages?.[page - 1] === 'string' ? cached.pages[page - 1] : ''
+            sendJson(response, 200, { page, text, cached: true })
+            return
+          }
+          const image = await readBody(request, OCR_BODY_LIMIT)
+          if (image.length === 0) {
+            sendJson(response, 400, { error: 'empty-image' })
+            return
+          }
+          // The text cache must exist before the merge so pages keep their text
+          // layer; this also proves the paper's bytes reached the Host first.
+          const paper = await loadPaperText(key)
+          if (paper === null) {
+            sendJson(response, 409, { error: 'no-paper-bytes' })
+            return
+          }
+          if (page > paper.numPages) {
+            sendJson(response, 400, { error: 'page-out-of-range' })
+            return
+          }
+          try {
+            const result = await recognizePage(image)
+            const merged = await mergeOcrPage(key, page, result.text)
+            sendJson(response, 200, {
+              page,
+              text: merged?.text ?? result.text,
+              ocrPages: merged?.ocrPages ?? [],
+              ms: result.ms,
+            })
+          } catch (error) {
+            sendJson(response, 503, {
+              error: 'ocr-failed',
+              detail: error instanceof Error ? error.message : 'unknown',
+            })
+          }
+          return
+        }
+
         if (request.method === 'GET' && url.pathname === `${ROUTE}/arxiv/search`) {
           const query = url.searchParams.get('q') ?? ''
           if (query.trim() === '') {
@@ -357,4 +439,7 @@ export function apply(ctx: HostContext): void {
     },
   })
   ctx.effect(() => disposeRoute, 'paper-reader: routes')
+  // The warm OCR worker holds a few hundred MiB of WASM memory; unload it with
+  // the plugin instead of leaving it for the rest of the Host process lifetime.
+  ctx.effect(() => () => { void disposeOcr() }, 'paper-reader: ocr engine')
 }

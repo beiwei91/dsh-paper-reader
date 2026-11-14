@@ -41,12 +41,20 @@ function parsePages(spec: string | undefined, numPages: number): { from: number;
 
 function describe(text: PaperText): string {
   const withText = text.pages.filter(page => page.trim() !== '').length
-  return [
+  const ocrPages = text.ocrPages ?? []
+  const lines = [
     `标题: ${text.title === '' ? '(PDF 元数据没有标题)' : text.title}`,
     `页数: ${text.numPages}`,
     `有文本层: ${withText}/${text.numPages} 页`,
     `目录项: ${text.outline.length}`,
-  ].join('\n')
+  ]
+  if (ocrPages.length === 0) {
+    lines.push(`OCR 文本: 0/${text.numPages} 页（扫描页在「论文」标签页打开后会自动识别）`)
+  } else {
+    const listed = ocrPages.slice(0, 8).join(', ')
+    lines.push(`OCR 文本: ${ocrPages.length}/${text.numPages} 页（已识别: p.${listed}${ocrPages.length > 8 ? ', …' : ''}）`)
+  }
+  return lines.join('\n')
 }
 
 export function createTools(current: ReadonlyMap<string, CurrentPaper>): ToolDefinition[] {
@@ -73,7 +81,7 @@ export function createTools(current: ReadonlyMap<string, CurrentPaper>): ToolDef
     {
       name: 'paper_info',
       description:
-        'Describe the paper currently open in the 论文 tab of this session: title, page count, how many pages carry a text layer, outline size, and how many highlights are saved.',
+        'Describe the paper currently open in the 论文 tab of this session: title, page count, how many pages carry a text layer, how many pages have OCR text (scanned pages), outline size, and how many highlights are saved.',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
       output: { schema: { type: 'string' }, render: (args: unknown, value: unknown) => render(String(value)) },
       async execute(_args: unknown, exec: { agent?: unknown; signal?: AbortSignal }): Promise<string> {
@@ -116,13 +124,22 @@ export function createTools(current: ReadonlyMap<string, CurrentPaper>): ToolDef
         const { text } = await load(exec)
         const range = input.pages === undefined ? { from: 1, to: Math.min(3, text.numPages) } : parsePages(input.pages, text.numPages)
         const budget = Math.min(MAX_MAX_CHARS, Math.max(500, Math.floor(input.maxChars ?? DEFAULT_MAX_CHARS)))
+        const ocrPages = new Set(text.ocrPages ?? [])
         const parts: string[] = []
         let used = 0
         let truncated = false
         for (let page = range.from; page <= range.to; page += 1) {
           if (exec.signal?.aborted === true) throw new Error('Reading was cancelled.')
           const body = text.pages[page - 1] ?? ''
-          const block = `\n[第 ${page} 页]\n${body.trim() === '' ? '(这一页没有文本层)' : body}`
+          const fromOcr = ocrPages.has(page)
+          const empty = body.trim() === ''
+          const label = `\n[第 ${page} 页${fromOcr ? ' · OCR' : ''}]`
+          const content = empty
+            ? fromOcr
+              ? '(这一页的 OCR 没有识别出文字)'
+              : '(这一页没有文本层；若是扫描页，在「论文」标签页打开后会自动 OCR)'
+            : body
+          const block = `${label}\n${content}`
           if (used + block.length > budget) {
             const room = budget - used
             if (room > 80) parts.push(`${block.slice(0, room)}…`)

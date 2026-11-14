@@ -18,6 +18,7 @@
   "files": [
     "lib/host.js",
     "lib/pdf.worker.mjs",
+    "lib/ocr",
     "client.js",
     "client.*.js",
     "cordis.patch.yml",
@@ -55,10 +56,15 @@
     "@deepseek-ai/dsh-session": "0.2.2-rc.3",
     "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
     "@esbuild/win32-x64": "0.25.12",
+    "@tesseract.js-data/chi_sim": "1.0.0",
+    "@tesseract.js-data/eng": "1.0.0",
     "@types/node": "^22.20.5",
     "@types/react": "^18.3.12",
     "esbuild": "0.25.12",
     "pdfjs-dist": "6.3.289",
-    "typescript": "^5.7.2"
+    "tesseract.js": "6.0.1",
+    "tesseract.js-core": "6.1.2",
+    "typescript": "^5.7.2",
+    "wasm-feature-detect": "1.10.1"
   }
 }

@@ -23,6 +23,11 @@ export interface PaperText {
   readonly title: string
   readonly pages: readonly string[]
   readonly outline: readonly OutlineEntry[]
+  /**
+   * Pages whose text came (or was attempted) from OCR. Present once the reader
+   * has OCR'd anything; older caches simply lack the field.
+   */
+  readonly ocrPages?: readonly number[]
 }
 
 type PdfDocument = Awaited<ReturnType<typeof getDocument>['promise']>
@@ -51,7 +56,26 @@ async function flattenOutline(doc: PdfDocument, nodes: readonly OutlineNode[], d
 }
 
 /** Extract (or read the cached) text of one paper. */
-export async function loadPaperText(key: string, signal?: AbortSignal): Promise<PaperText | null> {
+export function loadPaperText(key: string, signal?: AbortSignal): Promise<PaperText | null> {
+  // OCR merges and tool extractions share one cache file, so they take turns.
+  return withTextLock(key, () => loadPaperTextUnlocked(key, signal))
+}
+
+/** One paper's cache mutations in flight, so two writers never interleave. */
+const textLocks = new Map<string, Promise<unknown>>()
+
+function withTextLock<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const previous = textLocks.get(key) ?? Promise.resolve()
+  const result = previous.then(run, run)
+  const tail = result.then(() => undefined, () => undefined)
+  textLocks.set(key, tail)
+  void tail.then(() => {
+    if (textLocks.get(key) === tail) textLocks.delete(key)
+  })
+  return result
+}
+
+async function loadPaperTextUnlocked(key: string, signal?: AbortSignal): Promise<PaperText | null> {
   const paths = paperPaths(key)
   const cached = await readJson<PaperText>(paths.text)
   if (cached !== null && Array.isArray(cached.pages)) return cached
@@ -86,4 +110,29 @@ export async function loadPaperText(key: string, signal?: AbortSignal): Promise<
   } finally {
     void task.destroy()
   }
+}
+
+export interface OcrMergeResult {
+  readonly text: string
+  readonly numPages: number
+  readonly ocrPages: readonly number[]
+}
+
+/**
+ * Merge one OCR'd page into the paper's text cache, creating the cache first if
+ * the agent tools never asked for it. An OCR run that produced no text still
+ * marks the page, so a blank scan is not re-recognised on every open.
+ */
+export function mergeOcrPage(key: string, page: number, text: string): Promise<OcrMergeResult | null> {
+  return withTextLock(key, async () => {
+    const paper = await loadPaperTextUnlocked(key)
+    if (paper === null) return null
+    if (!Number.isInteger(page) || page < 1 || page > paper.numPages) return null
+    const pages = [...paper.pages]
+    const trimmed = text.trim()
+    if (trimmed !== '') pages[page - 1] = trimmed
+    const ocrPages = [...new Set([...(paper.ocrPages ?? []), page])].sort((left, right) => left - right)
+    await writeJson(paperPaths(key).text, { ...paper, pages, ocrPages })
+    return { text: pages[page - 1] ?? '', numPages: paper.numPages, ocrPages }
+  })
 }
