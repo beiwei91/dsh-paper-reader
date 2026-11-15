@@ -171,7 +171,7 @@ paper-reader/annotations/<sha1>.json    高亮与边注（{ key, highlights }）
 - **OCR 完全本地离线**：tesseract.js、WASM core 与 `eng`/`chi_sim` 语言数据随 bundle 分发，识别时不联网、不加载 CDN。
 - 浏览器端只访问 DSH 同源的 `/paper-reader/api/*`，不加载 CDN、字体、统计脚本或任何第三方资源。
 - 本地 PDF 完全在本地处理；论文文件、OCR 位图、识别文本与标注不会上传到任何服务器。
-- `/paper-reader/api/*` 只接受回环地址（`127.0.0.1` / `localhost` / `[::1]`），写操作还要求同源 `Origin`；其它来源返回 403。
+- `/paper-reader/api/*` 只接受回环地址（`127.0.0.1` / `localhost` / `[::1]`）；写操作要求 `Origin` 是回环来源，Renderer 不带 `Origin`（或 `Origin: null`）时按回环 `Host` 放行，跨站 `Origin` 返回 403。
 - **无遥测、无分析、无外部上报**。
 - 提醒：使用 arXiv 功能时，arXiv.org 能看到你检索 / 打开的 arXiv ID；本地 PDF 不产生任何网络请求。
 
@@ -236,7 +236,8 @@ pnpm typecheck    # tsc -p tsconfig.json
 ```
 src/client/index.tsx        tab 类型、body、标题、引导页入口注册
 src/client/PapersBody.tsx   空状态（路径/拖拽/arXiv 搜索）、按标签页恢复论文、标注与对话动作接线
-src/client/annotations.ts   按论文的标注 store（防抖写、离开时 flush）
+src/client/annotations.ts   按论文的标注 store（单飞队列写、失败可见可重试、离开时 keepalive flush）
+src/client/annotationQueue.ts  标注保存队列：单飞、合并、有界重试、teardown keepalive（可无浏览器测试）
 src/client/pdf/chunk.tsx    阅读层：渲染窗口、目录、全文搜索、选区工具条、笔记、OCR 队列接线
 src/client/pdf/marks.ts     按「页 + 文本片段」把高亮画回重建后的文本层
 src/client/ocr/queue.ts     扫描页 OCR 队列（空闲时逐页、当前页优先、有界、可取消）
@@ -245,6 +246,7 @@ src/host/index.ts           Host 入口：/paper-reader/api/*（含 OCR）、工
 src/host/{arxiv,store,text,tools}.ts  arXiv 抓取、落盘、文本抽取与 OCR 合并、四个只读工具
 src/host/ocr/*              OCR 引擎（串行 worker、超时、空闲回收）与构建期 worker 入口
 scripts/ocr-{fixture.py,check.mjs}  无浏览器的 OCR 复现自查
+scripts/annotation-save-test.cjs    无浏览器的标注保存队列自查
 ```
 
 ## 参与贡献与许可证

@@ -51,6 +51,10 @@ const zh: LocaleDictOf<'paperReader'> = {
   arxivOpenFailed: 'arXiv 论文打开失败',
   highlightSaved: '已高亮',
   errorNoActions: '对话输入框不可用，无法发送这段内容',
+  paperUploadFailed: '论文没有同步到 Host，agent 暂时读不到它',
+  annotationLoadFailed: '高亮和笔记读取失败，已保留当前内容',
+  annotationSaveFailed: '高亮和笔记保存失败',
+  retrying: '正在重试',
   ocr: 'OCR',
   ocrHint: '扫描页离线 OCR 进度（文本级，不生成文本层）',
 }
@@ -102,6 +106,10 @@ const en: LocaleDictOf<'paperReader'> = {
   arxivOpenFailed: 'Could not open that arXiv paper',
   highlightSaved: 'Highlighted',
   errorNoActions: 'The conversation composer is unavailable, so this cannot be sent',
+  paperUploadFailed: 'Paper not synced to the Host, so agent tools cannot read it yet',
+  annotationLoadFailed: 'Could not load highlights and notes; what is in memory was kept',
+  annotationSaveFailed: 'Could not save highlights and notes',
+  retrying: 'retrying',
   ocr: 'OCR',
   ocrHint: 'Scanned-page OCR progress (offline; text only, no text layer)',
 }

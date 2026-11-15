@@ -68,17 +68,63 @@ function isLoopbackHost(host: string | string[] | undefined): boolean {
   return name === '127.0.0.1' || name === 'localhost' || name === '[::1]'
 }
 
-/** Writes additionally require an Origin that matches the serving host. */
-function sameOrigin(headers: IncomingMessageLike['headers']): boolean {
+/** The Origin header as text, or `''` when the request carried none. */
+function originOf(headers: IncomingMessageLike['headers']): string {
   const origin = headers.origin
-  const host = headers.host
-  if (typeof origin !== 'string' || typeof host !== 'string') return false
+  if (typeof origin === 'string') return origin.trim()
+  if (Array.isArray(origin)) return origin.join(', ')
+  return ''
+}
+
+/** Whether an Origin value can only belong to software running on this machine. */
+function isLocalOrigin(origin: string): boolean {
   try {
     const parsed = new URL(origin)
-    return parsed.host === host && isLoopbackHost(parsed.host)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      // A remote page's origin is never a loopback host, so this is the one check
+      // that still rejects a cross-site browser request.
+      return isLoopbackHost(parsed.host)
+    }
+    // A custom scheme (the Host's own window, a desktop shell) exists only for a
+    // local application; the browser cannot mint one for a remote page.
+    return true
   } catch {
     return false
   }
+}
+
+/**
+ * Origin rule for the loopback-gated write routes.
+ *
+ * The listener only accepts loopback connections, so no other machine can reach
+ * this route at all. The Origin check is CSRF hardening against a browser page
+ * the user happens to have open, not authentication — a non-browser local client
+ * can set any header it likes, so requiring an exact Origin never kept one out.
+ * What a browser page *cannot* do is reach these handlers from another site:
+ * every write here is a `PUT`/`DELETE`, a JSON body, a PDF upload or a PNG OCR
+ * body, so a cross-origin page's request is stopped by a CORS preflight, and this
+ * route never answers `OPTIONS` or sends an allow-listed CORS response. A remote
+ * page can therefore only produce an http(s) Origin, which must be loopback to
+ * pass; an absent Origin (desktop shell / non-browser client) or `Origin: null`
+ * (opaque origin) is accepted because it cannot be a remote page's write. Reads
+ * stay unchanged and need no Origin at all.
+ */
+function writeAllowed(headers: IncomingMessageLike['headers']): boolean {
+  if (!isLoopbackHost(headers.host)) return false
+  const origin = originOf(headers)
+  if (origin === '' || origin.toLowerCase() === 'null') return true
+  return isLocalOrigin(origin)
+}
+
+/** The content type of a write body that the Client is known to send. */
+function contentTypeOf(request: IncomingMessageLike): string {
+  const type = request.headers['content-type']
+  return typeof type === 'string' ? type.trim().toLowerCase() : ''
+}
+
+/** Refuse a write whose Origin is not local, naming the value for the UI. */
+function denyOrigin(request: IncomingMessageLike, response: ServerResponseLike): void {
+  sendJson(response, 403, { error: 'bad-origin', origin: originOf(request.headers) })
 }
 
 function sendJson(response: ServerResponseLike, status: number, value: unknown): void {
@@ -202,8 +248,8 @@ export function apply(ctx: HostContext): void {
         }
 
         if (request.method === 'PUT' && url.pathname === `${ROUTE}/annotations`) {
-          if (!sameOrigin(request.headers)) {
-            sendJson(response, 403, { error: 'bad-origin' })
+          if (!writeAllowed(request.headers)) {
+            denyOrigin(request, response)
             return
           }
           const body = parseJsonBody(await readBody(request, JSON_BODY_LIMIT)) as {
@@ -224,8 +270,15 @@ export function apply(ctx: HostContext): void {
         }
 
         if (request.method === 'POST' && url.pathname === `${ROUTE}/paper`) {
-          if (!sameOrigin(request.headers)) {
-            sendJson(response, 403, { error: 'bad-origin' })
+          if (!writeAllowed(request.headers)) {
+            denyOrigin(request, response)
+            return
+          }
+          // The one Client that uploads always sends a PDF body. Requiring it keeps
+          // this route out of the "simple request" class, so a cross-origin page
+          // cannot post one without a preflight this route never answers.
+          if (!contentTypeOf(request).startsWith('application/pdf')) {
+            sendJson(response, 415, { error: 'bad-content-type' })
             return
           }
           const key = url.searchParams.get('key') ?? ''
@@ -249,8 +302,8 @@ export function apply(ctx: HostContext): void {
         }
 
         if (request.method === 'POST' && url.pathname === `${ROUTE}/current`) {
-          if (!sameOrigin(request.headers)) {
-            sendJson(response, 403, { error: 'bad-origin' })
+          if (!writeAllowed(request.headers)) {
+            denyOrigin(request, response)
             return
           }
           const body = parseJsonBody(await readBody(request, JSON_BODY_LIMIT)) as {
@@ -270,8 +323,13 @@ export function apply(ctx: HostContext): void {
         }
 
         if (request.method === 'DELETE' && url.pathname === `${ROUTE}/current`) {
-          // Clearing the open-paper pointer is harmless state on a loopback-gated
-          // route, and browsers do not send Origin on every same-origin DELETE.
+          // Clearing the open-paper pointer is harmless state, but it is still a
+          // write: run it through the same loopback/Origin gate. An absent Origin
+          // is accepted because browsers do not send it on every same-origin DELETE.
+          if (!writeAllowed(request.headers)) {
+            denyOrigin(request, response)
+            return
+          }
           const sessionId = url.searchParams.get('session') ?? ''
           current.delete(sessionId)
           sendJson(response, 200, { ok: true })
@@ -321,8 +379,14 @@ export function apply(ctx: HostContext): void {
         }
 
         if (request.method === 'POST' && url.pathname === `${ROUTE}/ocr`) {
-          if (!sameOrigin(request.headers)) {
-            sendJson(response, 403, { error: 'bad-origin' })
+          if (!writeAllowed(request.headers)) {
+            denyOrigin(request, response)
+            return
+          }
+          // The reader posts one canvas PNG per page; a form-encoded request must
+          // never reach the tesseract worker.
+          if (!contentTypeOf(request).startsWith('image/png')) {
+            sendJson(response, 415, { error: 'bad-content-type' })
             return
           }
           const key = url.searchParams.get('key') ?? ''
@@ -393,8 +457,8 @@ export function apply(ctx: HostContext): void {
         }
 
         if (request.method === 'POST' && url.pathname === `${ROUTE}/arxiv/open`) {
-          if (!sameOrigin(request.headers)) {
-            sendJson(response, 403, { error: 'bad-origin' })
+          if (!writeAllowed(request.headers)) {
+            denyOrigin(request, response)
             return
           }
           const body = parseJsonBody(await readBody(request, JSON_BODY_LIMIT)) as {

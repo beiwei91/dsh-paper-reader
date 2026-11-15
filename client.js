@@ -36,91 +36,206 @@ var import_react2 = require("react");
 
 // src/client/annotations.ts
 var import_react = require("react");
+
+// src/client/annotationQueue.ts
+var SAVE_ATTEMPTS = 6;
+var RETRY_BASE_MS = 500;
+var RETRY_MAX_MS = 8e3;
+function retryDelay(attempt) {
+  return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1));
+}
+function createAnnotationSaveQueue(deps) {
+  let pending = null;
+  let inFlight = false;
+  let attempt = 0;
+  let timer = null;
+  let newest = 0;
+  function dispatch(write, keepalive) {
+    const id = newest + 1;
+    newest = id;
+    inFlight = true;
+    void deps.put(write, keepalive).then((result) => {
+      if (id !== newest) {
+        if (!result.ok) deps.report({ kind: "save", status: result.status, code: result.code, retrying: false });
+        return;
+      }
+      inFlight = false;
+      if (result.ok) {
+        attempt = 0;
+        deps.report(null);
+        if (pending !== null) pump();
+        return;
+      }
+      if (pending === null) pending = write;
+      attempt += 1;
+      const retrying = attempt < SAVE_ATTEMPTS;
+      deps.report({ kind: "save", status: result.status, code: result.code, retrying });
+      if (!retrying) return;
+      if (timer !== null) deps.clearTimer(timer);
+      timer = deps.setTimer(() => {
+        timer = null;
+        pump();
+      }, retryDelay(attempt));
+    });
+  }
+  function pump() {
+    if (inFlight) return;
+    const write = pending;
+    if (write === null) return;
+    pending = null;
+    dispatch(write, false);
+  }
+  return {
+    enqueue(key, highlights) {
+      pending = { key, highlights };
+      pump();
+    },
+    flush(keepalive = false) {
+      if (timer !== null) {
+        deps.clearTimer(timer);
+        timer = null;
+      }
+      const write = pending;
+      if (write === null) return;
+      pending = null;
+      if (!keepalive) {
+        pending = write;
+        pump();
+        return;
+      }
+      dispatch(write, true);
+    },
+    resetAttempts() {
+      attempt = 0;
+    }
+  };
+}
+
+// src/client/annotations.ts
 var API = "/paper-reader/api/annotations";
-var SAVE_DELAY_MS = 300;
-var RETRY_DELAY_MS = 2e3;
+var LOAD_ATTEMPTS = 3;
 function newId() {
   return globalThis.crypto?.randomUUID?.() ?? `hl-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
-function putAnnotations(write, keepalive = false) {
-  return fetch(API, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ key: write.key, highlights: write.highlights }),
-    keepalive
-  }).then((response) => response.ok).catch((error) => {
-    console.warn("[paper-reader] annotation save failed", error);
-    return false;
+async function putAnnotations(write, keepalive) {
+  try {
+    const response = await fetch(API, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: write.key, highlights: write.highlights }),
+      keepalive
+    });
+    if (response.ok) return { ok: true, status: response.status, code: null };
+    const detail = await response.json().catch(() => null);
+    return { ok: false, status: response.status, code: typeof detail?.error === "string" ? detail.error : null };
+  } catch {
+    return { ok: false, status: null, code: null };
+  }
+}
+async function fetchAnnotations(key) {
+  try {
+    const response = await fetch(`${API}?key=${encodeURIComponent(key)}`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => null);
+      return { ok: false, status: response.status, code: typeof detail?.error === "string" ? detail.error : null };
+    }
+    const body = await response.json();
+    return { ok: true, highlights: Array.isArray(body.highlights) ? body.highlights : [] };
+  } catch {
+    return { ok: false, status: null, code: null };
+  }
+}
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
   });
 }
 function useAnnotations(storageKey) {
   const [highlights, setHighlights] = (0, import_react.useState)([]);
+  const [loadProblem, setLoadProblem] = (0, import_react.useState)(null);
+  const [saveProblem, setSaveProblem] = (0, import_react.useState)(null);
   const current = (0, import_react.useRef)([]);
   const keyRef = (0, import_react.useRef)(storageKey);
-  const saveTimer = (0, import_react.useRef)(null);
-  const pending = (0, import_react.useRef)(null);
-  const dirty = (0, import_react.useRef)(false);
+  const edited = (0, import_react.useRef)(false);
+  const alive = (0, import_react.useRef)(true);
+  const report = (0, import_react.useCallback)((problem) => {
+    if (alive.current) setSaveProblem(problem);
+  }, []);
+  const queueRef = (0, import_react.useRef)(null);
+  queueRef.current ??= createAnnotationSaveQueue({
+    put: putAnnotations,
+    report,
+    setTimer: (handler, ms) => window.setTimeout(handler, ms),
+    clearTimer: (handle) => {
+      window.clearTimeout(handle);
+    }
+  });
   const flush = (0, import_react.useCallback)((keepalive = false) => {
-    const write = pending.current;
-    pending.current = null;
-    if (write === null) return;
-    void putAnnotations(write, keepalive).then((ok) => {
-      if (ok) {
-        dirty.current = false;
-        return;
-      }
-      if (pending.current === null) pending.current = write;
-      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(() => flush(false), RETRY_DELAY_MS);
-    });
+    queueRef.current?.flush(keepalive);
   }, []);
   (0, import_react.useEffect)(() => {
-    flush(true);
+    flush();
+    queueRef.current?.resetAttempts();
     keyRef.current = storageKey;
     current.current = [];
+    edited.current = false;
     setHighlights([]);
-    dirty.current = false;
+    setLoadProblem(null);
     if (storageKey === null || storageKey === "") return;
     let cancelled = false;
     void (async () => {
-      try {
-        const response = await fetch(`${API}?key=${encodeURIComponent(storageKey)}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const body = await response.json();
+      for (let attempt = 1; attempt <= LOAD_ATTEMPTS; attempt += 1) {
+        const result = await fetchAnnotations(storageKey);
         if (cancelled || keyRef.current !== storageKey) return;
-        const stored = Array.isArray(body.highlights) ? body.highlights : [];
-        if (dirty.current) {
-          current.current = [...stored.filter((item) => !current.current.some((local) => local.id === item.id)), ...current.current];
-          setHighlights(current.current);
-          pending.current = { key: storageKey, highlights: current.current };
-          flush();
+        if (result.ok) {
+          if (edited.current) {
+            current.current = [
+              ...result.highlights.filter((item) => !current.current.some((local) => local.id === item.id)),
+              ...current.current
+            ];
+            setHighlights(current.current);
+            queueRef.current?.enqueue(storageKey, current.current);
+          } else {
+            current.current = result.highlights;
+            setHighlights(result.highlights);
+          }
+          setLoadProblem(null);
           return;
         }
-        current.current = stored;
-        setHighlights(stored);
-      } catch (error) {
-        if (!cancelled) console.warn("[paper-reader] annotations unavailable", error);
+        const retrying = attempt < LOAD_ATTEMPTS;
+        setLoadProblem({ kind: "load", status: result.status, code: result.code, retrying });
+        if (!retrying) return;
+        await sleep(retryDelay(attempt));
+        if (cancelled || keyRef.current !== storageKey) return;
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [flush, storageKey]);
-  (0, import_react.useEffect)(() => () => {
-    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    const write = pending.current;
-    if (write !== null) void putAnnotations(write, true);
-  }, []);
+  (0, import_react.useEffect)(() => {
+    alive.current = true;
+    const flushTeardown = () => flush(true);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flush(true);
+    };
+    window.addEventListener("pagehide", flushTeardown);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      alive.current = false;
+      window.removeEventListener("pagehide", flushTeardown);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      flush(true);
+    };
+  }, [flush]);
   const commit = (0, import_react.useCallback)((next) => {
     current.current = next;
     setHighlights(next);
+    edited.current = true;
     const key = keyRef.current;
     if (key === null || key === "") return;
-    dirty.current = true;
-    pending.current = { key, highlights: next };
-    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => flush(), SAVE_DELAY_MS);
-  }, [flush]);
+    queueRef.current?.enqueue(key, next);
+  }, []);
   const addHighlight = (0, import_react.useCallback)((input) => {
     const quote = input.quote.trim();
     if (quote === "") return;
@@ -139,7 +254,7 @@ function useAnnotations(storageKey) {
   const removeHighlight = (0, import_react.useCallback)((id) => {
     commit(current.current.filter((highlight) => highlight.id !== id));
   }, [commit]);
-  return { highlights, addHighlight, updateNote, removeHighlight };
+  return { highlights, addHighlight, updateNote, removeHighlight, flush, loadProblem, saveProblem };
 }
 
 // src/client/pdf/styles.ts
@@ -156,6 +271,7 @@ var BODY_CSS = `
 .pr-open-btn{border:1px solid var(--dsw-alias-border-primary,rgba(0,0,0,.16));background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.05));color:inherit;border-radius:6px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
 .pr-open-btn:disabled{opacity:.5;cursor:default}
 .pr-error{font-size:12px;line-height:1.5;color:var(--dsw-alias-label-error,#cf222e);max-width:420px;word-break:break-all}
+.pr-warn{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-warning,#9a6700);max-width:420px;word-break:break-word;padding:0 6px}
 .pr-results{width:100%;max-width:420px;max-height:38vh;overflow:auto;display:flex;flex-direction:column;gap:2px;border:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08));border-radius:8px;padding:4px}
 .pr-result{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;border:0;background:transparent;font:inherit;color:inherit;padding:5px 7px;border-radius:6px;cursor:pointer}
 .pr-result:hover{background:var(--dsw-alias-bg-hover,rgba(0,0,0,.06))}
@@ -173,6 +289,12 @@ function errorLine(code, t) {
   if (code === "workspace-file/not-text") return t("errorNotText");
   return code === void 0 ? t("errorRead") : `${t("errorRead")}: ${code}`;
 }
+function problemLine(label, problem, t) {
+  const status = problem.status === null ? "" : `HTTP ${problem.status}`;
+  const code = problem.code === void 0 || problem.code === null || problem.code === "" ? "" : ` \xB7 ${problem.code}`;
+  const detail = status === "" ? "" : ` (${status}${code})`;
+  return `${label}${detail}${problem.retrying ? ` \xB7 ${t("retrying")}` : ""}`;
+}
 function baseName(path) {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] || path;
@@ -186,6 +308,11 @@ function loadViewer() {
   return chunkPromise;
 }
 var MAX_FILE_BYTES = 32 * 1024 * 1024;
+var UPLOAD_ATTEMPTS = 5;
+var UPLOAD_RETRY_BASE_MS = 500;
+function uploadRetryDelay(attempt) {
+  return Math.min(8e3, UPLOAD_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1));
+}
 var TAB_PAPER_PREFIX = "dsh.paper-reader.tab.";
 function readTabPaper(tabId) {
   try {
@@ -230,6 +357,7 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
   const [searchResults, setSearchResults] = (0, import_react2.useState)(null);
   const [searching, setSearching] = (0, import_react2.useState)(false);
   const [error, setError] = (0, import_react2.useState)(null);
+  const [uploadProblem, setUploadProblem] = (0, import_react2.useState)(null);
   const [busy, setBusy] = (0, import_react2.useState)(false);
   const [dropping, setDropping] = (0, import_react2.useState)(false);
   const alive = (0, import_react2.useRef)(true);
@@ -432,6 +560,7 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
     if (file !== void 0) void openFile(file);
   }, [openFile]);
   const reset = (0, import_react2.useCallback)(() => {
+    annotations.flush();
     clearTabPaper(tabId);
     setPaper(null);
     setRestoring(false);
@@ -441,25 +570,50 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
     if (sessionId !== void 0 && sessionId !== "") {
       void fetch(`/paper-reader/api/current?session=${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => void 0);
     }
-  }, [sessionId, tabId]);
+  }, [annotations.flush, sessionId, tabId]);
   (0, import_react2.useEffect)(() => {
-    if (paper === null || sessionId === void 0 || sessionId === "" || paper.hostStored === true) return;
+    if (paper === null || sessionId === void 0 || sessionId === "" || paper.hostStored === true) {
+      setUploadProblem(null);
+      return;
+    }
     const controller = new AbortController();
+    let cancelled = false;
+    setUploadProblem(null);
     void (async () => {
-      try {
-        const query = `key=${encodeURIComponent(paper.storageKey)}&session=${encodeURIComponent(sessionId)}&title=${encodeURIComponent(paper.name)}`;
-        const response = await fetch(`/paper-reader/api/paper?${query}`, {
-          method: "POST",
-          headers: { "content-type": "application/pdf" },
-          body: paper.bytes,
-          signal: controller.signal
+      for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt += 1) {
+        let retrying = false;
+        try {
+          const query = `key=${encodeURIComponent(paper.storageKey)}&session=${encodeURIComponent(sessionId)}&title=${encodeURIComponent(paper.name)}`;
+          const response = await fetch(`/paper-reader/api/paper?${query}`, {
+            method: "POST",
+            headers: { "content-type": "application/pdf" },
+            body: paper.bytes,
+            signal: controller.signal
+          });
+          if (response.ok) {
+            if (!cancelled) setUploadProblem(null);
+            return;
+          }
+          if (cancelled) return;
+          retrying = attempt < UPLOAD_ATTEMPTS && response.status >= 500;
+          setUploadProblem({ status: response.status, retrying });
+          if (!retrying) return;
+        } catch {
+          if (cancelled || controller.signal.aborted) return;
+          retrying = attempt < UPLOAD_ATTEMPTS;
+          setUploadProblem({ status: null, retrying });
+          if (!retrying) return;
+        }
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, uploadRetryDelay(attempt));
         });
-        if (!response.ok) console.warn("[paper-reader] paper upload failed", response.status);
-      } catch (error2) {
-        if (!controller.signal.aborted) console.warn("[paper-reader] paper upload failed", error2);
+        if (cancelled || controller.signal.aborted) return;
       }
     })();
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [paper, sessionId]);
   const cite = (0, import_react2.useCallback)((text, page) => {
     return `${text}
@@ -481,6 +635,10 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
 ${instruction}`);
     inputActions.submit();
   }, [cite, inputActions, t]);
+  const warnings = [];
+  if (uploadProblem !== null) warnings.push(problemLine(t("paperUploadFailed"), uploadProblem, t));
+  if (annotations.loadProblem !== null) warnings.push(problemLine(t("annotationLoadFailed"), annotations.loadProblem, t));
+  if (annotations.saveProblem !== null) warnings.push(problemLine(t("annotationSaveFailed"), annotations.saveProblem, t));
   if (paper !== null) {
     return (0, import_react2.createElement)(
       "div",
@@ -492,6 +650,7 @@ ${instruction}`);
         (0, import_react2.createElement)("span", { className: "pr-name", title: paper.name }, paper.name),
         (0, import_react2.createElement)("button", { type: "button", className: "pr-open-btn", onClick: reset }, t("changePaper"))
       ),
+      ...warnings.map((line) => (0, import_react2.createElement)("div", { className: "pr-warn", key: line }, line)),
       error !== null && (0, import_react2.createElement)("div", { className: "pr-error" }, error),
       viewer === null ? (0, import_react2.createElement)("div", { className: "pr-status" }, t("loading")) : (0, import_react2.createElement)(viewer, {
         bytes: paper.bytes,
@@ -609,7 +768,8 @@ ${instruction}`);
           (0, import_react2.createElement)("span", { className: "pr-result-meta" }, `arXiv:${hit.id}${hit.published === "" ? "" : ` \xB7 ${hit.published}`}`)
         ))
       ),
-      error !== null && (0, import_react2.createElement)("div", { className: "pr-error" }, error)
+      error !== null && (0, import_react2.createElement)("div", { className: "pr-error" }, error),
+      ...warnings.map((line) => (0, import_react2.createElement)("div", { className: "pr-warn", key: line }, line))
     )
   );
 }
@@ -663,6 +823,10 @@ var zh = {
   arxivOpenFailed: "arXiv \u8BBA\u6587\u6253\u5F00\u5931\u8D25",
   highlightSaved: "\u5DF2\u9AD8\u4EAE",
   errorNoActions: "\u5BF9\u8BDD\u8F93\u5165\u6846\u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u53D1\u9001\u8FD9\u6BB5\u5185\u5BB9",
+  paperUploadFailed: "\u8BBA\u6587\u6CA1\u6709\u540C\u6B65\u5230 Host\uFF0Cagent \u6682\u65F6\u8BFB\u4E0D\u5230\u5B83",
+  annotationLoadFailed: "\u9AD8\u4EAE\u548C\u7B14\u8BB0\u8BFB\u53D6\u5931\u8D25\uFF0C\u5DF2\u4FDD\u7559\u5F53\u524D\u5185\u5BB9",
+  annotationSaveFailed: "\u9AD8\u4EAE\u548C\u7B14\u8BB0\u4FDD\u5B58\u5931\u8D25",
+  retrying: "\u6B63\u5728\u91CD\u8BD5",
   ocr: "OCR",
   ocrHint: "\u626B\u63CF\u9875\u79BB\u7EBF OCR \u8FDB\u5EA6\uFF08\u6587\u672C\u7EA7\uFF0C\u4E0D\u751F\u6210\u6587\u672C\u5C42\uFF09"
 };
@@ -713,6 +877,10 @@ var en = {
   arxivOpenFailed: "Could not open that arXiv paper",
   highlightSaved: "Highlighted",
   errorNoActions: "The conversation composer is unavailable, so this cannot be sent",
+  paperUploadFailed: "Paper not synced to the Host, so agent tools cannot read it yet",
+  annotationLoadFailed: "Could not load highlights and notes; what is in memory was kept",
+  annotationSaveFailed: "Could not save highlights and notes",
+  retrying: "retrying",
   ocr: "OCR",
   ocrHint: "Scanned-page OCR progress (offline; text only, no text layer)"
 };

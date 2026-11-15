@@ -59,6 +59,7 @@ export const BODY_CSS = `
 .pr-open-btn{border:1px solid var(--dsw-alias-border-primary,rgba(0,0,0,.16));background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.05));color:inherit;border-radius:6px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
 .pr-open-btn:disabled{opacity:.5;cursor:default}
 .pr-error{font-size:12px;line-height:1.5;color:var(--dsw-alias-label-error,#cf222e);max-width:420px;word-break:break-all}
+.pr-warn{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-warning,#9a6700);max-width:420px;word-break:break-word;padding:0 6px}
 .pr-results{width:100%;max-width:420px;max-height:38vh;overflow:auto;display:flex;flex-direction:column;gap:2px;border:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08));border-radius:8px;padding:4px}
 .pr-result{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;border:0;background:transparent;font:inherit;color:inherit;padding:5px 7px;border-radius:6px;cursor:pointer}
 .pr-result:hover{background:var(--dsw-alias-bg-hover,rgba(0,0,0,.06))}

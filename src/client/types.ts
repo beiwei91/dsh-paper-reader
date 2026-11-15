@@ -62,6 +62,10 @@ export type PaperReaderLocaleKey =
   | 'arxivOpenFailed'
   | 'highlightSaved'
   | 'errorNoActions'
+  | 'paperUploadFailed'
+  | 'annotationLoadFailed'
+  | 'annotationSaveFailed'
+  | 'retrying'
   | 'ocr'
   | 'ocrHint'
 

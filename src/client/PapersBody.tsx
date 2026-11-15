@@ -21,6 +21,21 @@ function errorLine(code: string | undefined, t: (key: PaperReaderLocaleKey) => s
   return code === undefined ? t('errorRead') : `${t('errorRead')}: ${code}`
 }
 
+/** A write the Client could not land, kept visible until the next successful one. */
+interface WriteProblem {
+  readonly status: number | null
+  readonly code?: string | null
+  readonly retrying: boolean
+}
+
+/** `label (HTTP 403 · bad-origin) · retrying` — the same shape for every write. */
+function problemLine(label: string, problem: WriteProblem, t: (key: PaperReaderLocaleKey) => string): string {
+  const status = problem.status === null ? '' : `HTTP ${problem.status}`
+  const code = problem.code === undefined || problem.code === null || problem.code === '' ? '' : ` · ${problem.code}`
+  const detail = status === '' ? '' : ` (${status}${code})`
+  return `${label}${detail}${problem.retrying ? ` · ${t('retrying')}` : ''}`
+}
+
 function baseName(path: string): string {
   const parts = path.split(/[\\/]/)
   return parts[parts.length - 1] || path
@@ -49,6 +64,14 @@ function loadViewer(): Promise<PdfChunkModule> {
 
 /** The complete-file cap the Host applies to `readBytes`. */
 const MAX_FILE_BYTES = 32 * 1024 * 1024
+
+/** Upload retries: a Host restart or a transient 5xx is worth retrying, a 4xx is not. */
+const UPLOAD_ATTEMPTS = 5
+const UPLOAD_RETRY_BASE_MS = 500
+
+function uploadRetryDelay(attempt: number): number {
+  return Math.min(8000, UPLOAD_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1))
+}
 
 /** Where this tab's open paper is remembered across a page reload or restart. */
 const TAB_PAPER_PREFIX = 'dsh.paper-reader.tab.'
@@ -120,6 +143,8 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
   const [searchResults, setSearchResults] = useState<ArxivHit[] | null>(null)
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** A paper upload the Host rejected or never answered; agent tools need it. */
+  const [uploadProblem, setUploadProblem] = useState<WriteProblem | null>(null)
   const [busy, setBusy] = useState(false)
   const [dropping, setDropping] = useState(false)
   const alive = useRef(true)
@@ -345,6 +370,9 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
   }, [openFile])
 
   const reset = useCallback((): void => {
+    // The last highlight or note edit must reach the Host before the paper goes
+    // away; the hook owns the queue, so ask it to send the newest state now.
+    annotations.flush()
     clearTabPaper(tabId)
     setPaper(null)
     setRestoring(false)
@@ -355,29 +383,55 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       void fetch(`/paper-reader/api/current?session=${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
         .catch(() => undefined)
     }
-  }, [sessionId, tabId])
+  }, [annotations.flush, sessionId, tabId])
 
   // The Host needs the bytes to answer the agent's paper_* tools; a failure
-  // here only costs those tools, never the reading experience. arXiv opens are
-  // already stored by the Host, so they must not upload the bytes twice.
+  // here only costs those tools, never the reading experience. It must still be
+  // visible: a 403 here means the agent cannot see the paper at all. arXiv opens
+  // are already stored by the Host, so they must not upload the bytes twice.
   useEffect(() => {
-    if (paper === null || sessionId === undefined || sessionId === '' || paper.hostStored === true) return
+    if (paper === null || sessionId === undefined || sessionId === '' || paper.hostStored === true) {
+      setUploadProblem(null)
+      return
+    }
     const controller = new AbortController()
+    let cancelled = false
+    setUploadProblem(null)
     void (async () => {
-      try {
-        const query = `key=${encodeURIComponent(paper.storageKey)}&session=${encodeURIComponent(sessionId)}&title=${encodeURIComponent(paper.name)}`
-        const response = await fetch(`/paper-reader/api/paper?${query}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/pdf' },
-          body: paper.bytes,
-          signal: controller.signal,
-        })
-        if (!response.ok) console.warn('[paper-reader] paper upload failed', response.status)
-      } catch (error) {
-        if (!controller.signal.aborted) console.warn('[paper-reader] paper upload failed', error)
+      for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt += 1) {
+        let retrying = false
+        try {
+          const query = `key=${encodeURIComponent(paper.storageKey)}&session=${encodeURIComponent(sessionId)}&title=${encodeURIComponent(paper.name)}`
+          const response = await fetch(`/paper-reader/api/paper?${query}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/pdf' },
+            body: paper.bytes,
+            signal: controller.signal,
+          })
+          if (response.ok) {
+            if (!cancelled) setUploadProblem(null)
+            return
+          }
+          if (cancelled) return
+          // A 4xx is this request's fault (permission/limits/shape); only a
+          // transient server error or a network failure is worth another try.
+          retrying = attempt < UPLOAD_ATTEMPTS && response.status >= 500
+          setUploadProblem({ status: response.status, retrying })
+          if (!retrying) return
+        } catch {
+          if (cancelled || controller.signal.aborted) return
+          retrying = attempt < UPLOAD_ATTEMPTS
+          setUploadProblem({ status: null, retrying })
+          if (!retrying) return
+        }
+        await new Promise(resolve => { window.setTimeout(resolve, uploadRetryDelay(attempt)) })
+        if (cancelled || controller.signal.aborted) return
       }
     })()
-    return () => controller.abort()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [paper, sessionId])
 
   const cite = useCallback((text: string, page: number): string => {
@@ -409,6 +463,13 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
     inputActions.submit()
   }, [cite, inputActions, t])
 
+  // Visible, non-blocking lines for writes the Host rejected: a hidden console
+  // warning was exactly how the annotation bug stayed invisible.
+  const warnings: string[] = []
+  if (uploadProblem !== null) warnings.push(problemLine(t('paperUploadFailed'), uploadProblem, t))
+  if (annotations.loadProblem !== null) warnings.push(problemLine(t('annotationLoadFailed'), annotations.loadProblem, t))
+  if (annotations.saveProblem !== null) warnings.push(problemLine(t('annotationSaveFailed'), annotations.saveProblem, t))
+
   if (paper !== null) {
     return h('div', { className: 'pr-body' },
       h('style', null, BODY_CSS),
@@ -416,6 +477,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
         h('span', { className: 'pr-name', title: paper.name }, paper.name),
         h('button', { type: 'button', className: 'pr-open-btn', onClick: reset }, t('changePaper')),
       ),
+      ...warnings.map(line => h('div', { className: 'pr-warn', key: line }, line)),
       error !== null && h('div', { className: 'pr-error' }, error),
       viewer === null
         ? h('div', { className: 'pr-status' }, t('loading'))
@@ -513,6 +575,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
         )),
       ),
       error !== null && h('div', { className: 'pr-error' }, error),
+      ...warnings.map(line => h('div', { className: 'pr-warn', key: line }, line)),
     ),
   )
 }
