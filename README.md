@@ -2,7 +2,6 @@
 
 在 DeepSeek Harness（DSH）右侧栏新增一个「论文」标签页，把 PDF 论文当作可读、可标注、可对话的对象：**连续滚动阅读、目录跳转、全文搜索、记忆阅读位置、Ctrl/Cmd + 滚轮缩放；八色高亮、下划线、页面文本框与边注徽标；一键生成结构化摘要提示词；把当前论文的批注导出为新的 PDF 副本；选中原文可引用到对话、让 agent 解释或翻译**。也支持 arXiv 链接/ID 与关键词搜索直接打开论文；agent 通过四个**只读**工具（`paper_info`、`paper_outline`、`paper_read`、`paper_search`）读取当前会话里打开的那篇论文。扫描版 PDF 会在阅读器空闲时做**文本级 OCR**，识别文本进入逐页文本缓存，因此页内搜索、翻译和 `paper_*` 工具同样可用。
 
-![论文阅读器示意（功能示意图，非真实截图）](docs/preview.svg)
 
 - 运行环境：在 DSH **0.2.2-rc.3** 上开发与验证；本轮不声明 `engines.dsh`，也没有 npm 发布。
 - 命名：包名 / 模块 loader 名 = **`dsh-paper-reader`**（来自 `package.json.name`，也是 bundle patch 的 `name` 字段）；cordis 插件行 id = **`paper-reader`**（`cordis.patch.yml` 的 `id`）；GitHub 仓库 = **`https://github.com/beiwei91/dsh-paper-reader`**。
