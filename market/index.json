@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "_note": "TEMPLATE ONLY — this file is not a published index. Before serving or linking to it, replace \"commit\" with the 40-hex commit of the release tag (git rev-list -n1 v0.1.0) and refresh publishTimestamp with the real Unix-seconds time; the placeholder below is deliberately invalid so a copy-pasted template cannot be mistaken for a real listing. See docs/PUBLISHING.md §16.2. The _note key is ignored by the validator.",
+  "_note": "TEMPLATE ONLY — this file is not a published index. Before serving or linking to it, replace \"commit\" with the 40-hex commit of the release tag (git rev-list -n1 v0.2.0) and refresh publishTimestamp with the real Unix-seconds time; the placeholder below is deliberately invalid so a copy-pasted template cannot be mistaken for a real listing. See docs/PUBLISHING.md §16.2. The _note key is ignored by the validator.",
   "title": {
     "en": "Paper Reader plugin index (TEMPLATE — replace the commit placeholder)",
     "zh": "论文阅读器插件索引（模板 — 请替换 commit 占位符）"
@@ -17,8 +17,8 @@
         "zh": "论文阅读器"
       },
       "description": {
-        "en": "Read local PDFs and arXiv papers in the DSH right sidebar: outline, full-text search, highlights with notes, quote/explain/translate, and read-only paper_* agent tools.",
-        "zh": "在 DSH 右侧栏读本地 PDF 与 arXiv 论文：目录、全文搜索、高亮与边注、引用/解释/翻译，以及只读 paper_* agent 工具。"
+        "en": "Read local PDFs and arXiv papers in the DSH right sidebar: continuous scrolling, outline, in-document search, remembered position, Ctrl/Cmd + wheel zoom and a recent-papers list; eight highlight colours, underlines, text boxes and margin notes; a structured digest prompt; annotated-PDF export; text-level OCR for scanned pages; quote/explain/translate; and read-only paper_* agent tools.",
+        "zh": "在 DSH 右侧栏读本地 PDF 与 arXiv 论文：连续滚动、目录、全文搜索、记忆位置、Ctrl/Cmd + 滚轮缩放、最近打开列表；八色高亮、下划线、文本框与边注；结构化摘要提示词；批注 PDF 导出；扫描页文本级 OCR；引用/解释/翻译；以及只读 paper_* agent 工具。"
       },
       "author": "beiwei91",
       "homepage": "https://github.com/beiwei91/dsh-paper-reader",
@@ -28,12 +28,12 @@
       "icon": "https://raw.githubusercontent.com/beiwei91/dsh-paper-reader/v0.1.0/icon.svg",
       "versions": [
         {
-          "version": "0.1.0",
+          "version": "0.2.0",
           "publishTimestamp": 1794662000,
           "source": {
             "type": "git",
             "url": "https://github.com/beiwei91/dsh-paper-reader",
-            "commit": "<40-hex commit of this repo, e.g. git rev-list -n1 v0.1.0>"
+            "commit": "<40-hex commit of this repo, e.g. git rev-list -n1 v0.2.0>"
           }
         }
       ]

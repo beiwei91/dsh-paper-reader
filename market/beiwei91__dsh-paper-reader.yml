@@ -5,14 +5,21 @@ category: productivity
 description:
   en: >-
     Paper Reader adds a Papers tab to the DSH right sidebar: read local PDFs and
-    arXiv papers with continuous scrolling, outline jumps, in-document search and
-    a remembered position; keep multi-colour highlights with margin notes; quote a
-    selection into the conversation or ask the agent to explain/translate it; four
-    read-only paper_* agent tools read the paper open in the session.
+    arXiv papers with continuous scrolling, outline jumps, in-document search, a
+    remembered position, Ctrl/Cmd + wheel zoom and a recent-papers list; annotate
+    with eight highlight colours, underlines, text boxes and margin notes; generate
+    a structured digest prompt; export the annotations onto a copy of the PDF as
+    <name>.annotated.pdf; OCR text on scanned pages so in-document search and the
+    read-only paper_* agent tools can read it; quote a selection into the
+    conversation or ask the agent to explain/translate it. Four read-only
+    paper_info / paper_outline / paper_read / paper_search tools read the paper open
+    in the session.
   zh: >-
     论文阅读器：在 DSH 右侧栏新增「论文」标签页，读本地 PDF 与 arXiv 论文（连续滚动、目录跳转、
-    全文搜索、记忆位置）；四色高亮与边注按论文保存；选中原文可引用到对话、让 agent 解释/翻译；
-    四个只读 paper_* 工具读取当前会话打开的论文。
+    全文搜索、记忆位置、Ctrl/Cmd + 滚轮缩放、最近打开列表）；八色高亮、下划线、文本框与边注按论文保存；
+    一键生成结构化摘要提示词；把批注导出为 PDF 副本（<name>.annotated.pdf）；扫描页可做文本级 OCR，
+    使页内搜索与只读 paper_* 工具同样可读；选中原文可引用到对话、让 agent 解释/翻译；
+    四个只读 paper_info / paper_outline / paper_read / paper_search 工具读取当前会话打开的论文。
 install: "github:beiwei91/dsh-paper-reader"
 added: "2026-11-14"
 icon: https://raw.githubusercontent.com/beiwei91/dsh-paper-reader/v0.1.0/icon.svg
