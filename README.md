@@ -6,7 +6,7 @@
 
 - 运行环境：在 DSH **0.2.2-rc.3** 上开发与验证；本轮不声明 `engines.dsh`，也没有 npm 发布。
 - 命名：包名 / 模块 loader 名 = **`dsh-paper-reader`**（来自 `package.json.name`，也是 bundle patch 的 `name` 字段）；cordis 插件行 id = **`paper-reader`**（`cordis.patch.yml` 的 `id`）；GitHub 仓库 = **`https://github.com/beiwei91/dsh-paper-reader`**。
-- 分发：**只走 GitHub**（仓库 + tag + Release）。**`v0.1.0` 已发布**（commit `e87e4bc`）；`main` 上本轮功能（八色标注、下划线、文本框、摘要提示词、批注导出、最近打开、Ctrl/Cmd + 滚轮缩放等）尚未打 tag，计划作为 **`v0.2.0`** 发布。npm 发布为未来可选项（unscoped 名 `dsh-paper-reader` 已被无关项目占用）。
+- 分发：**只走 GitHub**（仓库 + tag + Release）。**当前发布版本为 `v0.2.0`**（本仓库树包含八色标注、下划线、文本框、页边距徽标、摘要提示词、批注 PDF 导出、最近打开、Ctrl/Cmd + 滚轮缩放等）；更早的 `v0.1.0` 是已发布的预发布版本，其 tag/Release 保留、不再移动。npm 发布为未来可选项（unscoped 名 `dsh-paper-reader` 已被无关项目占用）。
 - 许可证：MIT；内置 PDF.js（Apache-2.0）、OCR 组件（`tesseract.js`、`tesseract.js-core`、语言数据等）与批注导出用的 `pdf-lib` 栈（MIT）的第三方许可见 [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md)。
 
 ---
@@ -133,9 +133,9 @@
 
 ## 安装
 
-本仓库是一个标准 DSH bundle（`package.json` 里声明 `dsh.bundle.patch`）。**只通过 GitHub 分发**（仓库 `https://github.com/beiwei91/dsh-paper-reader`，已发布的 tag 是 `v0.1.0`）；npm 发布为未来可选项，见下方「npm（计划中）」。
+本仓库是一个标准 DSH bundle（`package.json` 里声明 `dsh.bundle.patch`）。**只通过 GitHub 分发**（仓库 `https://github.com/beiwei91/dsh-paper-reader`，当前发布版本是 `v0.2.0`）；npm 发布为未来可选项，见下方「npm（计划中）」。
 
-> **版本说明**：`v0.1.0` 是当前公开发布版本（commit `e87e4bc`）；本文档描述的八色标注、下划线、文本框、摘要提示词、批注导出、最近打开、Ctrl/Cmd + 滚轮缩放等功能在 `main` 上，计划作为 `v0.2.0` 发布。想提前体验可按下面的 commit 方式安装 `main` 的完整 commit（发布后改用 `v0.2.0`）。
+> **版本说明**：当前公开发布版本是 **`v0.2.0`**（`package.json.version` 同为 `0.2.0`）；本文档描述的八色标注、下划线、文本框、页边距徽标、摘要提示词、批注导出、最近打开、Ctrl/Cmd + 滚轮缩放等功能都包含在该版本中，按下面的 commit / tag 方式安装即可。
 
 包名 / loader 名与 GitHub 仓库同名（`dsh-paper-reader`，来自 `package.json.name`）。
 
@@ -144,14 +144,14 @@
 需要本机 `git` 与 GitHub 网络。固定完整 40 位 commit 的 git 安装才可能被 `plugin_manager` 视为**可更新**安装：
 
 ```powershell
-# <40-hex> 来自：git rev-list -n1 v0.1.0（或 v0.2.0 发布后的新 tag）
+# <40-hex> 来自：git rev-list -n1 v0.2.0
 dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex>'
 ```
 
 ### 方式二：tag 形式
 
 ```powershell
-dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.1.0'
+dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.2.0'
 ```
 
 - 建议用引号包住 spec，避免 PowerShell 把 `#` 当注释。
@@ -164,7 +164,7 @@ dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.1.0'
 ### 方式三：GitHub Release tarball（备选）
 
 ```powershell
-dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader/releases/download/v0.1.0/dsh-paper-reader-0.1.0.tgz'
+dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader/releases/download/v0.2.0/dsh-paper-reader-0.2.0.tgz'
 ```
 
 > 注意：pnpm 11.0–11.8 配合 DSH profile 的 hoisted 布局安装裸 Release 资产 URL 时可能报 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`（11.9+ 正常）。优先用上面的 commit / tag 安装。
@@ -323,4 +323,4 @@ Data lives under `$DSH_HOME/paper-reader/` (paper bytes, extracted-text cache in
 
 **Known limitations:** page 1's size is used as a placeholder before a page renders; highlights/underlines are anchored by page + text and cross-page selections are rejected; duplicated text on a page is marked at its first occurrence only; moving/renaming a local PDF detaches its annotations; text boxes cannot be dragged (by design), existing marks cannot be recoloured or moved, and there is no freehand pen; switching right-sidebar tabs releases the PDF after about 1.5 s and reloads it from the Host's stored bytes; a 32 MiB file cap; the first selection drag on a page builds its text layer and takes a moment; scanned pages cannot be selected or annotated, OCR quality depends on the scan, and the rolling queue never scans a whole document automatically; export is one-way (no importing annotations back), margin notes are not embedded in the PDF, encrypted PDFs are refused, and unlocatable marks are skipped.
 
-Install from GitHub: `dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex>'` (pin the commit for updatable installs; `github:beiwei91/dsh-paper-reader#v0.1.0` also installs, and a local directory can be linked for development). `v0.1.0` is published; the feature round on `main` is planned as `v0.2.0`. The package/loader name and the GitHub repository are both `dsh-paper-reader`. An npm release is not possible under this unscoped name (already taken); a scoped package may follow. Development: `pnpm install && node build.mjs && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 and the export's `pdf-lib` stack is MIT (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/beiwei91/dsh-paper-reader`.
+Install from GitHub: `dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex>'` (pin the commit for updatable installs; `github:beiwei91/dsh-paper-reader#v0.2.0` also installs, and a local directory can be linked for development). `v0.2.0` is the current release. The package/loader name and the GitHub repository are both `dsh-paper-reader`. An npm release is not possible under this unscoped name (already taken); a scoped package may follow. Development: `pnpm install && node build.mjs && pnpm typecheck`. License: MIT; bundled PDF.js is Apache-2.0 and the export's `pdf-lib` stack is MIT (see `THIRD-PARTY-LICENSES.md`). Repository: `https://github.com/beiwei91/dsh-paper-reader`.

@@ -56,7 +56,7 @@
 | **GitHub 仓库** | 已创建：`https://github.com/beiwei91/dsh-paper-reader` | 无需再填 OWNER；剩余人工步骤（topic、tag/Release、PR）见 §16。 |
 | **市场文件（可选）** | `market/beiwei91__dsh-paper-reader.yml`、`market/index.json` 已备好 | 需要用户 PR / 自托管启用（§16）；不影响直接安装。 |
 | **发布前改名（§2）** | **已完成**：包名已改为 `dsh-paper-reader` 并重建/提交产物 | 本机 profile 仍需换包（移除旧 `@local` bundle、安装新包）+ 重启一次 DSH（§2 第 6 步，归 Desktop shell 执行）。 |
-| `README.md` 安装段与包名 | 已改写为「包名/loader id = `dsh-paper-reader`、GitHub 仓库 `beiwei91/dsh-paper-reader`」并补 GitHub 安装 spec（第 9–16 行） | 发布前仍建议用 `docs/README.draft.md` 整体覆盖（现 README 仍含本机绝对路径与开发向内容）。 |
+| `README.md` 安装段与包名 | 已改写为「包名/loader id = `dsh-paper-reader`、GitHub 仓库 `beiwei91/dsh-paper-reader`」并补 GitHub 安装 spec（第 9–16 行） | 已按 v0.2.0 发布版同步（README 与 `docs/README.draft.md` 内容一致，无本机绝对路径）；无需再整体覆盖。 |
 | 运行时验证 | 仅做过 typecheck / pack dry-run | 发布前按 §14 在真实 DSH 里装一次 GitHub tag（或本地目录）走查。 |
 | 图标/示意图授权 | `icon.svg`、`docs/preview.svg` 为仓库内文件 | 所有者确认可再分发（`host-plugin.md` 的显示资源要求）。 |
 | `testdata/attention.pdf`（2.2 MB） | 已被 `.gitignore` 忽略、未跟踪 | 保持不提交（论文 PDF 不应再分发）。 |
@@ -108,7 +108,7 @@
    - `cordis.patch.yml`：`name: '@local/dsh-paper-reader'` → `name: 'dsh-paper-reader'`（行 id `paper-reader` 不变；只改 `name` 字段）。
    - `src/client/index.tsx` 的 `TAB_ID`：`'@local/dsh-paper-reader'` → `'dsh-paper-reader'`（UI key，与包名保持一致）。
 2. **重新构建**（已完成）：`build.mjs` 用 `pkg.name` 生成模块 loader id；产物会写死它（`client.js`/`client.pdf.js` 第 2 行），**loader id 必须等于包名**，所以已用 `node build.mjs` 重建并提交 `client.js`、`client.pdf.js`、`lib/*`。不要手改产物。
-3. **替换 README**：`README.md` 安装段已改写为「包名/loader id = `dsh-paper-reader`、GitHub 仓库 `beiwei91/dsh-paper-reader`」并补 GitHub 安装 spec（本地目录安装保留为开发方式）；发布前仍建议用 `docs/README.draft.md` 整体覆盖（现 README 仍含本机绝对路径与开发向内容）。
+3. **替换 README**：`README.md` 安装段已改写为「包名/loader id = `dsh-paper-reader`、GitHub 仓库 `beiwei91/dsh-paper-reader`」并补 GitHub 安装 spec（本地目录安装保留为开发方式）；已按 `v0.2.0` 发布版同步，与 `docs/README.draft.md` 内容一致（无本机绝对路径），无需再整体覆盖。
 4. **校验**：`pnpm typecheck`；`git status --short` 干净；`client.js` 第 2 行 id 已是 `dsh-paper-reader`；确认 `LICENSE`、`THIRD-PARTY-LICENSES.md`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`、`locale/*.json` 都在 commit 里。
 5. **提交 + tag**：提交改名与重建产物，打 `v0.1.0`（与 `package.json.version` 一致），推送并创建 GitHub Release（§13）。
 6. **更新本机 profile（改名后必须做；需要一次 DSH 重启）**：先移除旧 `@local/dsh-paper-reader` bundle，再安装 `dsh-paper-reader`（GitHub tag 或本地目录），然后**重启一次 DSH**。旧/新 patch 都插入同一行 id `paper-reader`，不能同时存在；旧依赖键改名后也不可解析。桌面 profile 的包操作归 Desktop shell。
@@ -235,14 +235,14 @@ git diff --stat -- client.js client.pdf.js lib/
 包名/loader id 是 `dsh-paper-reader`（来自 `package.json.name`），GitHub 仓库是 `beiwei91/dsh-paper-reader`。推荐固定 40 位 commit（只有完整 commit 固定的 git 依赖才可能被 `plugin_manager` 视为可更新安装）：
 
 ```powershell
-# <40-hex commit> 来自：git rev-list -n1 v0.1.0
+# <40-hex commit> 来自：git rev-list -n1 v0.2.0
 dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex commit>'
 ```
 
 tag 形式（可以安装，但 tag/branch spec 不参与自动更新）：
 
 ```powershell
-dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.1.0'
+dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.2.0'
 ```
 
 - 建议用引号包住 spec：PowerShell 里 `#` 可能被当成注释起始。
@@ -254,12 +254,12 @@ dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.1.0'
 ### 6.2 GitHub Release 资产 tarball
 
 ```powershell
-dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader/releases/download/v0.1.0/dsh-paper-reader-0.1.0.tgz'
+dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader/releases/download/v0.2.0/dsh-paper-reader-0.2.0.tgz'
 ```
 
 - 安装目标是四类之一（npm 名、git URL、tarball URL、本地绝对目录），tarball URL 被支持。
 - **注意**：pnpm 11.0–11.8 + hoisted linker（DSH profile 的默认布局）对裸 Release 资产 URL 不记录 integrity，可能报 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`；11.9+ 可用。Desktop 捆绑的 pnpm 版本可能偏旧，因此 **tag/git 安装是更稳的首选**，tarball 作为备选。
-- 也可安装 GitHub 自动生成的源码归档 URL（`https://github.com/beiwei91/dsh-paper-reader/archive/refs/tags/v0.1.0.tar.gz`）；同样受上面 pnpm 版本注意项影响（**未逐一实测**）。
+- 也可安装 GitHub 自动生成的源码归档 URL（`https://github.com/beiwei91/dsh-paper-reader/archive/refs/tags/v0.2.0.tar.gz`）；同样受上面 pnpm 版本注意项影响（**未逐一实测**）。
 
 ### 6.3 本地目录（开发/未发布）
 
@@ -382,17 +382,17 @@ dsh plugin --profile <profile> add '@beiwei91/dsh-paper-reader'
 - [ ] 用户可读变更：Ctrl/Cmd + 滚轮缩放（光标锚定，25%–400%）、高倍缩放下的横向滚动、最近打开列表（最多 12 条，重开 + 悬停 × 移除）、八色标注、下划线工具、文本框（页面比例锚定、Esc/失焦提交、空内容删除、不可拖动）、有边注标注的页边距徽标、笔记列表按类型标注并跳到标注本身、工具栏「摘要 / Digest」、工具栏「导出 / Export」生成 `<name>.annotated.pdf`。
 - [ ] 导出限制要写清：边注正文不写入 PDF、原文件不改、加密 PDF 拒绝、文本层定位不到的引文会被跳过、导出是单向的（不能导回插件）。
 - [ ] 兼容性：旧标注数据没有 `kind` 字段时按 `highlight` 自动读取，无需迁移；`$DSH_HOME/paper-reader/**` 与旧版数据兼容。
-- [ ] 安装命令：Release 正文用 §11.2 的原文，把 `v0.1.0` 全部换成 `v0.2.0`（commit 用 `git rev-list -n1 v0.2.0`）。
+- [ ] 安装命令：Release 正文直接用 §11.2 的原文（`v0.2.0`；commit 用 `git rev-list -n1 v0.2.0`）。
 - [ ] 许可证与打包：`THIRD-PARTY-LICENSES.md` 已含 pdf-lib 栈（§14–§18），`pnpm pack --dry-run` 仍为 **21 文件**（§5）。
 
 ### 11.2 用户安装命令（本轮发放给用户的原文）
 
 ```powershell
-# 推荐：固定 v0.1.0 的 40 位 commit（git rev-list -n1 v0.1.0）
+# 推荐：固定 v0.2.0 的 40 位 commit（git rev-list -n1 v0.2.0）
 dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex commit>'
 
 # tag 形式（可安装；tag/branch spec 不参与自动更新）
-dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.1.0'
+dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.2.0'
 ```
 
 或让 agent 执行：`plugin_manager` → `install_bundle`，target 填 `git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex commit>`（或 tag 形式）。
@@ -402,10 +402,10 @@ dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.1.0'
 Release 资产 tarball（备选，注意 pnpm 版本）：
 
 ```powershell
-dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader/releases/download/v0.1.0/dsh-paper-reader-0.1.0.tgz'
+dsh plugin --profile <profile> add 'https://github.com/beiwei91/dsh-paper-reader/releases/download/v0.2.0/dsh-paper-reader-0.2.0.tgz'
 ```
 
-> 发布 `v0.2.0` 时把本节与 §6 里的 `v0.1.0` 全部换成 `v0.2.0`（commit 用 `git rev-list -n1 v0.2.0`）；`v0.1.0` 的 tag/Release 原样保留，不重打、不移动。
+> 需要安装更早的 `v0.1.0` 预发布版本时，把本节与 §6 里的 `v0.2.0` 换成 `v0.1.0` 即可；`v0.1.0` 的 tag/Release 原样保留，不重打、不移动。
 
 安装后核对：Plugins 出现 `dsh-paper-reader` 行、右栏「论文」标签、四个 `paper_*` 工具。
 
@@ -550,7 +550,7 @@ category: productivity   # UNVERIFIED enum：PR 前换成 awesome 仓库允许�
 > 注：上面的描述与仓库里的 `market/beiwei91__dsh-paper-reader.yml` 已按 `v0.2.0` 功能集同步（2026-11-15：八色标注、下划线、文本框、边注徽标、摘要提示词、批注导出、最近打开、Ctrl/Cmd + 滚轮缩放、扫描页 OCR）；`market/index.json` 是同一功能集的模板，`commit` 仍为故意明显的占位符。提 PR / 自托管前按本段与 awesome 仓库的 CI/分类要求核对。
 
 - **`category` 枚举未验证**：本机没有目录枚举（`registry.d.ts` 只把 `category` 当 `string | string[]`，catalog 的 categories 表在远端）。`productivity` 只是占位，提 PR 前按 awesome 仓库的 category 列表选最接近的（阅读/效率/工具类）。
-- **`install` 的语义**：dshmarket 实际从 `url`/`npm`/`tarball` 推导安装目标（无 npm/tarball 时 → `github:beiwei91/dsh-paper-reader`，见 §1 表格最后几行）；本字段用同一推导值。要 tag 固定可改用 `git+https://github.com/beiwei91/dsh-paper-reader.git#v0.1.0`。若 CI 对 `install` 有额外格式要求，以 CI 为准。
+- **`install` 的语义**：dshmarket 实际从 `url`/`npm`/`tarball` 推导安装目标（无 npm/tarball 时 → `github:beiwei91/dsh-paper-reader`，见 §1 表格最后几行）；本字段用同一推导值。要 tag 固定可改用 `git+https://github.com/beiwei91/dsh-paper-reader.git#v0.2.0`。若 CI 对 `install` 有额外格式要求，以 CI 为准。
 - **screenshots（可选）**：awesome 仓库支持可选的 `screenshots.json`（1–8 个 repo 相对路径，UNVERIFIED 格式）。真实截图需要人工补；别把 `docs/preview.svg` 当成截图提交（它是示意图）。
 
 ### 16.2 自托管 format-1 index（不依赖 awesome 收录）
@@ -595,7 +595,7 @@ category: productivity   # UNVERIFIED enum：PR 前换成 awesome 仓库允许�
 ```powershell
 dsh plugin --profile <profile> add 'git+https://github.com/beiwei91/dsh-paper-reader.git#<40-hex commit>'
 # 或 tag 形式（不参与自动更新）
-dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.1.0'
+dsh plugin --profile <profile> add 'github:beiwei91/dsh-paper-reader#v0.2.0'
 ```
 
 agent 用 `plugin_manager` → `install_bundle`，target 填同一 spec。
