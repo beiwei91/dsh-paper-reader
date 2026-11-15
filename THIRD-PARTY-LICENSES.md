@@ -22,6 +22,12 @@ Several small packages are pulled into the same bundles transitively by
 present in the published `lib/ocr/*.cjs` files, even though this project never
 imports them directly.
 
+The manual annotated-PDF export is also vendored at build time: `build.mjs`
+bundles `pdf-lib` and its transitive dependencies into `client.pdf.js`. As with
+OCR, no npm package is installed at runtime and the export never reaches the
+network. Sections 14–18 cover that stack, and are included because its code is
+present in the published `client.pdf.js`.
+
 | # | Component | Version | License | Embedded in |
 |---|---|---|---|---|
 | 1 | `pdfjs-dist` (PDF.js) | 6.3.289 | Apache-2.0 | `lib/host.js`, `client.pdf.js`, `lib/pdf.worker.mjs` |
@@ -37,6 +43,11 @@ imports them directly.
 | 11 | `tr46` | 0.0.3 | MIT (no license file shipped) | `lib/ocr/engine.cjs` (transitive) |
 | 12 | `bmp-js` | 0.1.0 | MIT | `lib/ocr/worker.cjs` (transitive) |
 | 13 | `is-url` | 1.2.4 | MIT (no copyright line shipped) | `lib/ocr/engine.cjs` (transitive) |
+| 14 | `pdf-lib` | 1.17.1 | MIT | `client.pdf.js` |
+| 15 | `@pdf-lib/standard-fonts` | 1.0.0 | MIT | `client.pdf.js` (transitive) |
+| 16 | `@pdf-lib/upng` | 1.0.1 | MIT | `client.pdf.js` (transitive) |
+| 17 | `pako` | 1.0.11 | MIT | `client.pdf.js` (transitive) |
+| 18 | `tslib` | 1.14.1 | 0BSD | `client.pdf.js` (transitive) |
 
 --------------------------------------------------------------------------------
 
@@ -1262,3 +1273,187 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+## 14. pdf-lib (`pdf-lib` 1.17.1)
+
+- Project: pdf-lib — https://github.com/Hopding/pdf-lib
+- npm package: `pdf-lib@1.17.1`
+- License: MIT
+- Copyright: Copyright (c) 2019 Andrew Dillon
+- What it is / where it is embedded: a pure-JavaScript PDF creation/modification
+  library. `build.mjs` bundles it (with the transitive packages in sections 15–18)
+  into `client.pdf.js`, where the reader reaches it only through
+  `import('./exportPdf.ts')` when the user presses Export. It writes the annotated
+  copy entirely in the browser; nothing is sent to the Host or the network.
+- The full MIT license text below is copied verbatim from
+  `node_modules/.pnpm/pdf-lib@1.17.1/node_modules/pdf-lib/LICENSE.md`.
+
+### License text — MIT (pdf-lib)
+
+MIT License
+
+Copyright (c) 2019 Andrew Dillon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+## 15. `@pdf-lib/standard-fonts` (1.0.0)
+
+- Project: pdf-lib standard fonts — https://github.com/Hopding/pdf-lib
+- npm package: `@pdf-lib/standard-fonts@1.0.0`
+- License: MIT
+- Copyright: Copyright (c) 2018 Andrew Dillon
+- What it is / where it is embedded: the font metrics for the PDF standard 14
+  fonts, a dependency of `pdf-lib`; bundled into `client.pdf.js` at build time by
+  `build.mjs`. The export never draws with the standard fonts (CJK needs the
+  browser's system fonts), but the library code is present in the bundle.
+- The full MIT license text below is copied verbatim from
+  `node_modules/.pnpm/@pdf-lib+standard-fonts@1.0.0/node_modules/@pdf-lib/standard-fonts/LICENSE.md`.
+
+### License text — MIT (@pdf-lib/standard-fonts)
+
+MIT License
+
+Copyright (c) 2018 Andrew Dillon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+## 16. `@pdf-lib/upng` (1.0.1)
+
+- Project: UPNG.js — https://github.com/photopea/UPNG.js
+- npm package: `@pdf-lib/upng@1.0.1`
+- License: MIT
+- Copyright: Copyright (c) 2017 Photopea
+- What it is / where it is embedded: a PNG encoder/decoder used by `pdf-lib` for
+  `embedPng` (the export embeds rasterised text boxes as PNG). A dependency of
+  `pdf-lib`, bundled into `client.pdf.js` at build time by `build.mjs`.
+- The full MIT license text below is copied verbatim from
+  `node_modules/.pnpm/@pdf-lib+upng@1.0.1/node_modules/@pdf-lib/upng/LICENSE`.
+
+### License text — MIT (@pdf-lib/upng)
+
+MIT License
+
+Copyright (c) 2017 Photopea
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+## 17. pako (`pako` 1.0.11)
+
+- Project: pako — https://github.com/nodeca/pako
+- npm package: `pako@1.0.11`
+- License: MIT
+- Copyright: Copyright (C) 2014-2017 by Vitaly Puzrin and Andrei Tuputcyn
+- What it is / where it is embedded: a zlib port used by `pdf-lib` for
+  deflate/inflate, a dependency of `pdf-lib` bundled into `client.pdf.js` at build
+  time by `build.mjs`.
+- The full MIT license text below is copied verbatim from
+  `node_modules/.pnpm/pako@1.0.11/node_modules/pako/LICENSE`.
+
+### License text — MIT (pako)
+
+(The MIT License)
+
+Copyright (C) 2014-2017 by Vitaly Puzrin and Andrei Tuputcyn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+## 18. tslib (`tslib` 1.14.1)
+
+- Project: tslib — https://github.com/microsoft/tslib
+- npm package: `tslib@1.14.1`
+- License: 0BSD
+- Copyright: Copyright (c) Microsoft Corporation.
+- What it is / where it is embedded: the TypeScript runtime helper library that
+  `pdf-lib`'s compiled output imports, a dependency of `pdf-lib` bundled into
+  `client.pdf.js` at build time by `build.mjs`.
+- The full 0BSD license text below is copied verbatim from
+  `node_modules/.pnpm/tslib@1.14.1/node_modules/tslib/LICENSE.txt`.
+
+### License text — 0BSD (tslib)
+
+Copyright (c) Microsoft Corporation.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.

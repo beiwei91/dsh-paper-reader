@@ -5,10 +5,13 @@
  */
 export const VIEWER_CSS = `
 .pr-root{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;color:var(--dsw-alias-label-primary,#1f2328)}
-.pr-toolbar{flex:0 0 auto;display:flex;align-items:center;gap:2px;padding:5px 6px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08))}
+.pr-toolbar{flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:2px;row-gap:2px;padding:5px 6px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08))}
 .pr-btn{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#57606a);border-radius:6px;padding:3px 6px;font:inherit;font-size:12px;line-height:1.5;cursor:pointer}
 .pr-btn:hover{background:var(--dsw-alias-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#1f2328)}
 .pr-btn[aria-pressed="true"]{background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.09));color:var(--dsw-alias-label-primary,#1f2328)}
+/* A disabled action (annotation export) still occupies its slot so the toolbar does not jump. */
+.pr-btn:disabled{opacity:.45;cursor:default}
+.pr-btn:disabled:hover{background:transparent;color:var(--dsw-alias-label-secondary,#57606a)}
 .pr-spacer{flex:1 1 auto}
 .pr-pages{position:relative;flex:1 1 auto;min-height:0;min-width:0;overflow:auto;padding:12px 0 48px;scroll-behavior:auto}
 /* The page column is as wide as its widest page and at least as wide as the

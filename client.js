@@ -1109,7 +1109,14 @@ var zh = {
   underlineSaved: "\u5DF2\u52A0\u4E0B\u5212\u7EBF",
   textBoxSaved: "\u5DF2\u653E\u7F6E\u6587\u672C\u6846",
   textBoxPlaceholder: "\u5728\u8FD9\u91CC\u5199\u70B9\u4EC0\u4E48\u2026",
-  textBoxEditorLabel: "\u6587\u672C\u6846\u5185\u5BB9"
+  textBoxEditorLabel: "\u6587\u672C\u6846\u5185\u5BB9",
+  exportAction: "\u5BFC\u51FA",
+  exportHint: "\u5BFC\u51FA\u5E26\u6279\u6CE8\u7684 PDF \u526F\u672C\uFF08\u5171 {count} \u6761\u6279\u6CE8\uFF09",
+  exporting: "\u6B63\u5728\u5BFC\u51FA\u6279\u6CE8\u2026",
+  exportProgress: "\u6B63\u5728\u5BFC\u51FA\u6279\u6CE8\u2026 {done}/{total}",
+  exportDone: "\u5DF2\u5BFC\u51FA {file}",
+  exportFailed: "\u5BFC\u51FA\u5931\u8D25\uFF1A{reason}",
+  exportEncrypted: "\u8FD9\u7BC7 PDF \u5DF2\u52A0\u5BC6\uFF0C\u65E0\u6CD5\u5199\u5165\u6279\u6CE8"
 };
 var en = {
   title: "Papers",
@@ -1200,7 +1207,14 @@ var en = {
   underlineSaved: "Underlined",
   textBoxSaved: "Text box placed",
   textBoxPlaceholder: "Write something here\u2026",
-  textBoxEditorLabel: "Text box content"
+  textBoxEditorLabel: "Text box content",
+  exportAction: "Export",
+  exportHint: "Export a copy of the PDF with annotations ({count})",
+  exporting: "Exporting annotations\u2026",
+  exportProgress: "Exporting annotations\u2026 {done}/{total}",
+  exportDone: "Exported {file}",
+  exportFailed: "Export failed: {reason}",
+  exportEncrypted: "This PDF is encrypted, so annotations cannot be written to it"
 };
 function registerPapersLocale(ctx) {
   const disposeZh = ctx.locale.register(LOCALE_NS, "zh", zh);

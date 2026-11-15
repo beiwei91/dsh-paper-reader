@@ -95,6 +95,13 @@ export type PaperReaderLocaleKey =
   | 'textBoxSaved'
   | 'textBoxPlaceholder'
   | 'textBoxEditorLabel'
+  | 'exportAction'
+  | 'exportHint'
+  | 'exporting'
+  | 'exportProgress'
+  | 'exportDone'
+  | 'exportFailed'
+  | 'exportEncrypted'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {

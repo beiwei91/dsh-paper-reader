@@ -12,7 +12,8 @@ import type { AnnotationKind, Highlight, HighlightColor } from '../annotations.t
 import type { PdfViewerProps } from '../contract.ts'
 import { createOcrScheduler, type OcrProgress, type OcrScheduler } from '../ocr/queue.ts'
 import { pageTextLength, renderPagePng, type OcrDocument } from '../ocr/raster.ts'
-import { layoutHighlights, type PaintedHighlight } from './marks.ts'
+import type { MeasuredPage } from './exportPdf.ts'
+import { layoutHighlights, type HighlightBox, type PaintedHighlight } from './marks.ts'
 import { VIEWER_CSS } from './styles.ts'
 
 type PdfDoc = Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>
@@ -325,6 +326,8 @@ export function PdfViewer({
   const wheelZoomRef = useRef<(event: WheelEvent) => void>(() => undefined)
   /** The latest copy function, so the painted badges stay localisable without repainting on every render. */
   const tRef = useRef(t)
+  /** One annotated-PDF export at a time; the button's disabled state is not a lock on its own. */
+  const exportRunning = useRef(false)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   /** Whether the document should be loaded: false while this tab is hidden. */
@@ -349,6 +352,8 @@ export function PdfViewer({
   const [toolColor, setToolColor] = useState<HighlightColor>(DEFAULT_UNDERLINE_COLOR)
   /** One transient toolbar line, so a gesture never looks like it did nothing. */
   const [toast, setToast] = useState('')
+  /** True while the annotated-PDF export runs; the toolbar button is disabled then. */
+  const [exporting, setExporting] = useState(false)
   const toastTimer = useRef<number | null>(null)
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
   /** Pages the Host's OCR cache already had when this document opened (for the digest prompt). */
@@ -741,6 +746,71 @@ export function PdfViewer({
       canvas.height = 0
     }
   }, [cancelJob])
+
+  /**
+   * Measure one page's annotations for the PDF export, without touching the live
+   * page DOM.
+   *
+   * Export cannot reuse the painted geometry: far pages are released and pages
+   * outside the render window may have no text layer at all. So it rebuilds the
+   * page's text layer at scale 1 inside a throwaway off-screen frame, runs the
+   * same character-exact matcher the on-screen overlay uses, and reports the
+   * boxes in page-local pixels (which are PDF points at scale 1) plus the page's
+   * viewport transform. Only the export button calls this, one page at a time.
+   *
+   * The caller attaches the viewer's stylesheet for the duration of an export
+   * (the text layer only lays out correctly with its CSS: font metrics,
+   * transforms, the `--total-scale-factor` custom property). One `<style>` serves
+   * every page of the export, so a long paper does not restyle the document once
+   * per page.
+   */
+  const measureExportPage = useCallback(async (pageNumber: number, withText: boolean): Promise<MeasuredPage> => {
+    const doc = docRef.current
+    if (doc === null) throw new Error('the document is not loaded')
+    const page = await doc.getPage(pageNumber)
+    const viewport = page.getViewport({ scale: 1 })
+    const toPdf = (x: number, y: number): { x: number; y: number } => {
+      const [pdfX, pdfY] = viewport.convertToPdfPoint(x, y) as [number, number]
+      return { x: pdfX, y: pdfY }
+    }
+    const boxes = new Map<string, readonly HighlightBox[]>()
+    const measured: MeasuredPage = {
+      rotation: viewport.rotation,
+      width: viewport.width,
+      height: viewport.height,
+      toPdf,
+      boxes,
+    }
+    // Text boxes are fraction-anchored and need no text layer.
+    if (!withText) return measured
+
+    const frame = document.createElement('div')
+    frame.className = 'pr-page'
+    frame.style.cssText = `position:fixed;left:-200000px;top:0;width:${viewport.width}px;height:${viewport.height}px;pointer-events:none`
+    const layer = document.createElement('div')
+    layer.className = 'pr-text'
+    layer.style.width = `${viewport.width}px`
+    layer.style.height = `${viewport.height}px`
+    // PDF.js lays runs out in `--total-scale-factor` units; a standalone layer
+    // publishes the factor itself, exactly as the on-screen build does.
+    layer.style.setProperty('--total-scale-factor', String(viewport.scale))
+    frame.append(layer)
+    document.body.append(frame)
+    try {
+      const content = await page.getTextContent()
+      const textLayer = new pdfjs.TextLayer({ textContentSource: content, container: layer, viewport })
+      await textLayer.render()
+      const pageAnnotations = highlightsRef.current.filter(annotation =>
+        annotation.page === pageNumber && annotation.kind !== 'text',
+      )
+      for (const painted of layoutHighlights(layer, frame, pageAnnotations)) {
+        boxes.set(painted.id, painted.rects)
+      }
+    } finally {
+      frame.remove()
+    }
+    return measured
+  }, [])
 
   /** Paint one page's canvas, with a watchdog so a stuck render cannot freeze the panel. */
   const renderCanvas = useCallback(async (pageNumber: number): Promise<void> => {
@@ -1649,6 +1719,61 @@ export function PdfViewer({
     )
   }, [announce, buildDigestPrompt, onDigest, t])
 
+  /**
+   * Export every annotation on this paper as a new PDF download.
+   *
+   * Nothing runs until the user presses the button: the pipeline module (and
+   * pdf-lib inside it) is imported at that moment, so a reader who never exports
+   * never pays for it. The result is a manual browser download of a copy — the
+   * Host is not asked to write anything — and the existing toast narrates
+   * progress and the final file name.
+   */
+  const exportAnnotations = useCallback(async (): Promise<void> => {
+    if (exportRunning.current) return
+    const annotations = highlightsRef.current
+    if (annotations.length === 0 || docRef.current === null) return
+    exportRunning.current = true
+    setExporting(true)
+    announce(t('exporting'))
+    let pdfExport: typeof import('./exportPdf.ts') | null = null
+    // The off-screen measurement rebuilds PDF.js text layers, whose spans only
+    // lay out with the viewer's own CSS. One temporary copy, identical to the
+    // rules already on screen, covers every page of this export.
+    let layerStyle: HTMLStyleElement | null = null
+    try {
+      pdfExport = await import('./exportPdf.ts')
+      layerStyle = document.createElement('style')
+      layerStyle.textContent = VIEWER_CSS
+      document.head.append(layerStyle)
+      const fontFamily = window.getComputedStyle(rootRef.current ?? document.body).fontFamily
+      const result = await pdfExport.exportAnnotatedPdf({
+        bytes,
+        name,
+        annotations,
+        fontFamily,
+        measurePage: measureExportPage,
+        onProgress: (exported, total) => announce(
+          t('exportProgress').replace('{done}', String(exported)).replace('{total}', String(total)),
+        ),
+      })
+      pdfExport.downloadPdf(result.bytes, result.fileName)
+      announce(t('exportDone').replace('{file}', result.fileName))
+    } catch (error) {
+      console.warn('[paper-reader] annotations export failed', error)
+      const code = pdfExport !== null && error instanceof pdfExport.PdfExportError ? error.code : null
+      if (code === 'encrypted') {
+        announce(t('exportEncrypted'))
+      } else {
+        const reason = error instanceof Error && error.message !== '' ? error.message : 'unknown error'
+        announce(t('exportFailed').replace('{reason}', reason))
+      }
+    } finally {
+      layerStyle?.remove()
+      exportRunning.current = false
+      setExporting(false)
+    }
+  }, [announce, bytes, measureExportPage, name, t])
+
   // The page list is rebuilt only when the document or zoom changes: a scroll
   // tick then re-renders the toolbar and indicator alone, not every wrapper.
   const pageElements = useMemo(() => Array.from({ length: numPages }, (_, index) => {
@@ -1690,6 +1815,9 @@ export function PdfViewer({
     return `${annotationKindLabel(annotation.kind)} · p.${annotation.page} · ${clipped}${note}`
   }
 
+  /** The export button's tooltip/aria-label, carrying how much it would export. */
+  const exportHint = t('exportHint').replace('{count}', String(highlights.length))
+
   return h('div', { className: 'pr-root', ref: rootRef },
     h('style', null, VIEWER_CSS),
     h('div', { className: 'pr-toolbar' },
@@ -1719,6 +1847,17 @@ export function PdfViewer({
       h('button', {
         type: 'button', className: 'pr-btn', title: t('digest'), onClick: generateDigest,
       }, t('digest')),
+      // Manual, one-shot export of a copy with the annotations painted in; never
+      // automatic, and impossible with an empty paper (there would be nothing to draw).
+      h('button', {
+        type: 'button',
+        className: 'pr-btn',
+        title: exportHint,
+        'aria-label': exportHint,
+        'aria-busy': exporting ? 'true' : 'false',
+        disabled: exporting || status !== 'ready' || highlights.length === 0,
+        onClick: () => void exportAnnotations(),
+      }, t('exportAction')),
       h('span', { className: 'pr-spacer' }),
       ocrProgress !== null && h('span', { className: 'pr-ocr', title: t('ocrHint') }, `${t('ocr')} ${ocrProgress.done}/${ocrProgress.total}`),
       h('button', { type: 'button', className: 'pr-btn', title: t('zoomOut'), onClick: () => zoomBy(1 / 1.2) }, '−'),

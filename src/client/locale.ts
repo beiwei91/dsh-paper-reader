@@ -94,6 +94,13 @@ const zh: LocaleDictOf<'paperReader'> = {
   textBoxSaved: '已放置文本框',
   textBoxPlaceholder: '在这里写点什么…',
   textBoxEditorLabel: '文本框内容',
+  exportAction: '导出',
+  exportHint: '导出带批注的 PDF 副本（共 {count} 条批注）',
+  exporting: '正在导出批注…',
+  exportProgress: '正在导出批注… {done}/{total}',
+  exportDone: '已导出 {file}',
+  exportFailed: '导出失败：{reason}',
+  exportEncrypted: '这篇 PDF 已加密，无法写入批注',
 }
 
 const en: LocaleDictOf<'paperReader'> = {
@@ -186,6 +193,13 @@ const en: LocaleDictOf<'paperReader'> = {
   textBoxSaved: 'Text box placed',
   textBoxPlaceholder: 'Write something here…',
   textBoxEditorLabel: 'Text box content',
+  exportAction: 'Export',
+  exportHint: 'Export a copy of the PDF with annotations ({count})',
+  exporting: 'Exporting annotations…',
+  exportProgress: 'Exporting annotations… {done}/{total}',
+  exportDone: 'Exported {file}',
+  exportFailed: 'Export failed: {reason}',
+  exportEncrypted: 'This PDF is encrypted, so annotations cannot be written to it',
 }
 
 /** Register this plugin's dictionaries; the returned disposer lives in one effect. */
