@@ -664,9 +664,10 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
           // The tab type keeps this body mounted while another right-sidebar tab
           // is in front; the viewer uses this to release its heavy resources.
           visible: tab.visible,
-          onCreateHighlight: annotations.addHighlight,
+          onCreateAnnotation: annotations.addAnnotation,
           onUpdateNote: annotations.updateNote,
-          onDeleteHighlight: annotations.removeHighlight,
+          onUpdateTextBox: annotations.updateTextBox,
+          onDeleteAnnotation: annotations.removeAnnotation,
           onQuote: quote,
           onAsk: ask,
           onDigest: deliverDigest,

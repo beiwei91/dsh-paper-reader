@@ -7,7 +7,7 @@ import type { WorkspaceByteReadOptions, WorkspaceFileBytes } from '@deepseek-ai/
 import type { InputActions } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { Highlight, HighlightColor } from './annotations.ts'
+import type { AddAnnotationInput, Highlight } from './annotations.ts'
 import type { PaperReaderLocaleKey } from './types.ts'
 
 /** Props the reader chunk's exported viewer takes. */
@@ -20,7 +20,7 @@ export interface PdfViewerProps {
   name?: string
   /** The plugin's copy function, so the chunk needs no locale service of its own. */
   t: (key: PaperReaderLocaleKey) => string
-  /** Every stored highlight of this paper; the viewer paints the ones on screen. */
+  /** Every stored annotation of this paper (all kinds); the viewer paints the ones on screen. */
   highlights: readonly Highlight[]
   /**
    * Whether the tab that hosts this viewer is actually on screen. The tab body
@@ -28,9 +28,13 @@ export interface PdfViewerProps {
    * document, canvases and text layers until the tab is shown again.
    */
   visible?: boolean
-  onCreateHighlight(input: { page: number; color: HighlightColor; quote: string }): void
+  /** Create one highlight, underline or text box; returns its id (`''` when rejected). */
+  onCreateAnnotation(input: AddAnnotationInput): string
   onUpdateNote(id: string, note: string): void
-  onDeleteHighlight(id: string): void
+  /** Replace a text box's content; empty content deletes it. */
+  onUpdateTextBox(id: string, text: string): void
+  /** Delete one annotation of any kind. */
+  onDeleteAnnotation(id: string): void
   /** Put a selection into the conversation composer as a quote. */
   onQuote(text: string, page: number): void
   /** Quote a selection and ask the agent about it. */

@@ -7,7 +7,8 @@
 import * as pdfjs from 'pdfjs-dist'
 import { createElement as h, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import workerSource from '../../../.build/pdf-worker.txt'
-import type { Highlight, HighlightColor } from '../annotations.ts'
+import { ANNOTATION_COLORS, clampFraction } from '../../shared/annotationModel.ts'
+import type { AnnotationKind, Highlight, HighlightColor } from '../annotations.ts'
 import type { PdfViewerProps } from '../contract.ts'
 import { createOcrScheduler, type OcrProgress, type OcrScheduler } from '../ocr/queue.ts'
 import { pageTextLength, renderPagePng, type OcrDocument } from '../ocr/raster.ts'
@@ -72,13 +73,18 @@ interface ReaderSelection {
   readonly y: number
 }
 
-/** The open note editor for one highlight. */
+/** The open note editor: a margin note, or a text box's content. */
 interface NoteEditor {
   readonly id: string
-  readonly note: string
+  readonly kind: AnnotationKind
+  /** The note (highlight/underline) or the box's content (text). */
+  readonly value: string
   readonly x: number
   readonly y: number
 }
+
+/** The annotation tool armed in the toolbar, if any. */
+type ActiveTool = 'underline' | 'text'
 
 const DEFAULT_PAGE: PageSize = { w: 612, h: 792 }
 const MAX_ZOOM = 4
@@ -91,7 +97,15 @@ const MAX_CANVAS_DIM = 16384
 const MAX_CANVAS_AREA = 16777216
 const MAX_HITS = 60
 const POSITION_PREFIX = 'dsh.paper-reader.pos.'
-const COLORS: readonly HighlightColor[] = ['yellow', 'green', 'blue', 'pink']
+/** Swatch order, shared with the Host allow-list. */
+const COLORS = ANNOTATION_COLORS
+/** Underline stroke thickness in page pixels (page-local, so it scales with zoom). */
+const UNDERLINE_THICKNESS = 2
+/** A text box anchors at the click point and grows inward past these fractions. */
+const TEXT_BOX_ANCHOR_X = 0.6
+const TEXT_BOX_ANCHOR_Y = 0.75
+/** The underline tool starts on the palette's original blue accent. */
+const DEFAULT_UNDERLINE_COLOR: HighlightColor = 'blue'
 /**
  * Ctrl/Cmd+wheel zoom rate: one wheel delta unit scales by `exp(-delta * rate)`.
  * Fine enough for a trackpad pinch and still a sensible notch on a real wheel.
@@ -254,9 +268,10 @@ export function PdfViewer({
   t,
   highlights,
   visible = true,
-  onCreateHighlight,
+  onCreateAnnotation,
   onUpdateNote,
-  onDeleteHighlight,
+  onUpdateTextBox,
+  onDeleteAnnotation,
   onQuote,
   onAsk,
   onDigest,
@@ -266,11 +281,13 @@ export function PdfViewer({
   const pageRefs = useRef<(HTMLDivElement | null)[]>([])
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([])
   const textRefs = useRef<(HTMLDivElement | null)[]>([])
-  /** Per-page overlay holding the painted highlight rectangles. */
+  /** Per-page overlay holding the painted highlight rectangles and underline strokes. */
   const hlRefs = useRef<(HTMLDivElement | null)[]>([])
   /** Per-page overlay holding one note badge per annotated highlight. */
   const badgeRefs = useRef<(HTMLDivElement | null)[]>([])
-  /** Painted highlight geometry per page, in page-local coordinates, for click hit-testing. */
+  /** Per-page overlay holding the fraction-anchored text boxes. */
+  const tbRefs = useRef<(HTMLDivElement | null)[]>([])
+  /** Painted quote-anchored geometry per page, in page-local coordinates, for click hit-testing. */
   const hitRects = useRef<Map<number, readonly PaintedHighlight[]>>(new Map())
   const docRef = useRef<PdfDoc | null>(null)
   const workerRef = useRef<PdfWorker | null>(null)
@@ -326,6 +343,10 @@ export function PdfViewer({
   const [searching, setSearching] = useState(false)
   const [selection, setSelection] = useState<ReaderSelection | null>(null)
   const [noteEditor, setNoteEditor] = useState<NoteEditor | null>(null)
+  /** The armed annotation tool: selection underlines, or click places text boxes. */
+  const [activeTool, setActiveTool] = useState<ActiveTool | null>(null)
+  /** The underline stroke colour chosen in the toolbar's palette strip. */
+  const [toolColor, setToolColor] = useState<HighlightColor>(DEFAULT_UNDERLINE_COLOR)
   /** One transient toolbar line, so a gesture never looks like it did nothing. */
   const [toast, setToast] = useState('')
   const toastTimer = useRef<number | null>(null)
@@ -360,35 +381,43 @@ export function PdfViewer({
     setToast('')
   }, [])
 
-  /** Open one highlight's note editor at a viewport point (shared by boxes and margin badges). */
+  /**
+   * Open one annotation's editor at a viewport point (shared by boxes, underlines,
+   * margin badges and the notes list). A text box is edited as its content; a
+   * highlight/underline is edited as its margin note.
+   */
   const openNoteEditor = useCallback((id: string, clientX: number, clientY: number): void => {
-    const highlight = highlightsRef.current.find(candidate => candidate.id === id)
-    if (highlight === undefined) return
+    const annotation = highlightsRef.current.find(candidate => candidate.id === id)
+    if (annotation === undefined) return
     const pane = scrollRef.current?.getBoundingClientRect()
     const left = pane?.left ?? 0
     const width = pane?.width ?? 360
     setNoteEditor({
-      id: highlight.id,
-      note: highlight.note,
+      id: annotation.id,
+      kind: annotation.kind,
+      value: annotation.kind === 'text' ? annotation.text ?? '' : annotation.note,
       x: Math.max(8, Math.min(clientX, left + width - 240)),
       y: Math.max(8, clientY - 20),
     })
   }, [])
 
   /**
-   * Recompute one page's highlight overlay from its built text layer.
+   * Recompute one page's quote-anchored overlay from its built text layer.
    *
    * Painting is character-exact now: `layoutHighlights` turns each stored quote
    * into a DOM Range and its client rects (one box per line), so a partial
    * selection paints only the selected characters instead of the whole PDF.js
-   * text run. The geometry is kept per page for click hit-testing, because the
-   * overlay boxes themselves are `pointer-events: none`. Pages without a built
-   * layer are never measured here.
+   * text run. A highlight fills each box; an underline rules a 2 px stroke along
+   * the box's bottom edge and has no fill. The geometry is kept per page for
+   * click hit-testing, because the overlay boxes themselves are
+   * `pointer-events: none`. Pages without a built layer are never measured here;
+   * text boxes never pass through here (they are fraction-anchored).
    *
    * Annotated cards also get a note badge in the right page margin, at the last
-   * painted line's vertical centre: it must sit outside the glyphs, so it starts
-   * just past the box and is clamped inside the page's right edge. Badges are
-   * repainted (and removed) together with their rectangles.
+   * painted line's vertical centre (for an underline: at the ruled line): it must
+   * sit outside the glyphs, so it starts just past the box and is clamped inside
+   * the page's right edge. Badges are repainted (and removed) together with their
+   * rectangles.
    */
   const paintPageHighlights = useCallback((pageNumber: number): void => {
     const textEl = textRefs.current[pageNumber - 1]
@@ -397,24 +426,38 @@ export function PdfViewer({
     const badgeLayer = badgeRefs.current[pageNumber - 1]
     if (textEl === null || textEl === undefined || pageEl === null || pageEl === undefined || layer === null || layer === undefined) {
       // The page's DOM is gone (released/unmounted): no boxes can show, and its
-      // cached geometry must not survive to open a dead highlight's note.
+      // cached geometry must not survive to open a dead annotation's editor.
       hitRects.current.delete(pageNumber)
       if (badgeLayer !== null && badgeLayer !== undefined) badgeLayer.replaceChildren()
       return
     }
-    const pageHighlights = highlightsRef.current.filter(highlight => highlight.page === pageNumber)
+    const pageAnnotations = highlightsRef.current.filter(annotation =>
+      annotation.page === pageNumber && annotation.kind !== 'text',
+    )
     layer.replaceChildren()
     if (badgeLayer !== null && badgeLayer !== undefined) badgeLayer.replaceChildren()
-    if (pageHighlights.length === 0 || textEl.childElementCount === 0) {
+    if (pageAnnotations.length === 0 || textEl.childElementCount === 0) {
       hitRects.current.set(pageNumber, [])
       return
     }
-    const painted = layoutHighlights(textEl, pageEl, pageHighlights)
-    for (const highlight of painted) {
-      for (const box of highlight.rects) {
+    const painted = layoutHighlights(textEl, pageEl, pageAnnotations)
+    for (const annotation of painted) {
+      for (const box of annotation.rects) {
+        if (annotation.kind === 'underline') {
+          // A 2 px stroke whose centre sits ~1 px above the box's bottom edge, so
+          // the ruled line hugs the text's descender box.
+          const line = document.createElement('div')
+          line.className = 'pr-hl-line'
+          line.setAttribute('data-color', annotation.color)
+          line.style.left = `${box.x}px`
+          line.style.top = `${box.bottom - UNDERLINE_THICKNESS}px`
+          line.style.width = `${box.w}px`
+          layer.append(line)
+          continue
+        }
         const rect = document.createElement('div')
         rect.className = 'pr-hl-rect'
-        rect.setAttribute('data-color', highlight.color)
+        rect.setAttribute('data-color', annotation.color)
         rect.style.left = `${box.x}px`
         rect.style.top = `${box.y}px`
         rect.style.width = `${box.w}px`
@@ -425,21 +468,22 @@ export function PdfViewer({
     if (badgeLayer !== null && badgeLayer !== undefined && painted.length > 0) {
       const pageWidth = pageEl.clientWidth || pageEl.offsetWidth
       const notes = new Map<string, string>()
-      for (const highlight of pageHighlights) notes.set(highlight.id, highlight.note)
-      for (const highlight of painted) {
-        const note = (notes.get(highlight.id) ?? '').trim()
-        const last = highlight.rects[highlight.rects.length - 1]
+      for (const annotation of pageAnnotations) notes.set(annotation.id, annotation.note)
+      for (const annotation of painted) {
+        const note = (notes.get(annotation.id) ?? '').trim()
+        const last = annotation.rects[annotation.rects.length - 1]
         if (note === '' || last === undefined) continue
         const badge = document.createElement('button')
         badge.type = 'button'
         badge.className = 'pr-hl-badge'
-        badge.setAttribute('data-color', highlight.color)
+        badge.setAttribute('data-color', annotation.color)
         badge.setAttribute('aria-label', tRef.current('noteBadge'))
         badge.title = note.length > 120 ? `${note.slice(0, 120)}…` : note
         // Right page margin, never over the glyphs: `BADGE_GAP` past the last box,
         // and at worst flush against the page's inner right edge.
+        const anchorY = annotation.kind === 'underline' ? last.bottom - 2 : last.y + last.h / 2
         const left = Math.min(last.x + last.w + BADGE_GAP, Math.max(0, pageWidth - BADGE_SIZE - 1))
-        const top = Math.max(0, last.y + last.h / 2 - BADGE_SIZE / 2)
+        const top = Math.max(0, anchorY - BADGE_SIZE / 2)
         badge.style.left = `${left}px`
         badge.style.top = `${top}px`
         badge.addEventListener('mousedown', (event: MouseEvent) => {
@@ -451,12 +495,63 @@ export function PdfViewer({
           event.preventDefault()
           event.stopPropagation()
           const box = badge.getBoundingClientRect()
-          openNoteEditor(highlight.id, box.left, box.top)
+          openNoteEditor(annotation.id, box.left, box.top)
         })
         badgeLayer.append(badge)
       }
     }
     hitRects.current.set(pageNumber, painted)
+  }, [openNoteEditor])
+
+  /**
+   * Paint one page's text boxes (`kind: 'text'`) into their own overlay.
+   *
+   * A text box is anchored by a fraction of the page's unscaled size, so it needs
+   * no text layer and is already zoom-independent: the same fractions place it at
+   * the same spot at every scale. The overlay itself is `pointer-events: none` and
+   * each box is `pointer-events: auto`, so a box only takes pointer events over its
+   * own area and page text stays selectable everywhere else. Placement is exact at
+   * the click point; dragging is deliberately not supported (a drag would fight
+   * the text-selection gesture), so a box near an edge grows toward the page
+   * interior instead of hanging off it.
+   *
+   * No layout reads: positions are percentages; only the click-to-edit path reads a
+   * box's rect, and only when the user clicks one.
+   */
+  const paintPageTextBoxes = useCallback((pageNumber: number, boxes: readonly Highlight[]): void => {
+    const layer = tbRefs.current[pageNumber - 1]
+    if (layer === null || layer === undefined) return
+    if (boxes.length === 0) {
+      if (layer.childElementCount > 0) layer.replaceChildren()
+      return
+    }
+    layer.replaceChildren()
+    for (const annotation of boxes) {
+      const text = (annotation.text ?? '').trim()
+      if (text === '') continue
+      const xPct = clampFraction(annotation.xPct)
+      const yPct = clampFraction(annotation.yPct)
+      const box = document.createElement('div')
+      box.className = 'pr-tb'
+      box.textContent = text
+      box.setAttribute('role', 'button')
+      box.setAttribute('aria-label', tRef.current('textBox'))
+      box.style.left = `${xPct * 100}%`
+      box.style.top = `${yPct * 100}%`
+      box.style.transform = `translate(${xPct > TEXT_BOX_ANCHOR_X ? '-100%' : '0'},${yPct > TEXT_BOX_ANCHOR_Y ? '-100%' : '0'})`
+      box.addEventListener('mousedown', (event: MouseEvent) => {
+        // Keep the reader's gesture handling out of the box. Focus is allowed to
+        // move, so an open editor commits its value through `blur`.
+        event.stopPropagation()
+      })
+      box.addEventListener('click', (event: MouseEvent) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const rect = box.getBoundingClientRect()
+        openNoteEditor(annotation.id, rect.left, rect.top)
+      })
+      layer.append(box)
+    }
   }, [openNoteEditor])
 
   // A hidden tab stays mounted, so the open paper cannot disappear; only the
@@ -492,6 +587,11 @@ export function PdfViewer({
     for (const element of badgeRefs.current) {
       if (element !== null && element !== undefined && element.childElementCount > 0) element.replaceChildren()
     }
+    // Text boxes are fraction-anchored, so they survive a zoom; dropping them here
+    // and repainting from the fractions keeps their layer in step with the pages.
+    for (const element of tbRefs.current) {
+      if (element !== null && element !== undefined && element.childElementCount > 0) element.replaceChildren()
+    }
     hitRects.current.clear()
   }, [scale])
 
@@ -510,6 +610,23 @@ export function PdfViewer({
       paintPageHighlights(page)
     }
   }, [highlights, numPages, paintPageHighlights, scale, status, visible])
+
+  // Text boxes are repainted from the stored fractions whenever the annotations,
+  // the zoom or the page window changes: no text layer is needed, no layout is read,
+  // and a released far page repaints itself when it comes back into the window.
+  useEffect(() => {
+    if (status !== 'ready') return
+    const byPage = new Map<number, Highlight[]>()
+    for (const annotation of highlights) {
+      if (annotation.kind !== 'text') continue
+      const list = byPage.get(annotation.page)
+      if (list === undefined) byPage.set(annotation.page, [annotation])
+      else list.push(annotation)
+    }
+    for (let index = 0; index < pageRefs.current.length; index += 1) {
+      paintPageTextBoxes(index + 1, byPage.get(index + 1) ?? [])
+    }
+  }, [currentPage, highlights, numPages, paintPageTextBoxes, scale, status, visible])
 
   const cancelJob = useCallback((pageNumber: number): void => {
     jobs.current.get(pageNumber)?.cancel()
@@ -615,6 +732,8 @@ export function PdfViewer({
     if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
     const badgeLayer = badgeRefs.current[pageNumber - 1]
     if (badgeLayer !== null && badgeLayer !== undefined && badgeLayer.childElementCount > 0) badgeLayer.replaceChildren()
+    const tbLayer = tbRefs.current[pageNumber - 1]
+    if (tbLayer !== null && tbLayer !== undefined && tbLayer.childElementCount > 0) tbLayer.replaceChildren()
     hitRects.current.delete(pageNumber)
     const canvas = canvasRefs.current[pageNumber - 1]
     if (canvas !== null && canvas !== undefined && canvas.width > 1) {
@@ -723,6 +842,7 @@ export function PdfViewer({
     setShowNotes(false)
     setSelection(null)
     setNoteEditor(null)
+    setActiveTool(null)
     setCachedOcrPages(0)
     restoreRef.current = readPosition(storageKey)
     void (async () => {
@@ -769,6 +889,9 @@ export function PdfViewer({
         if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
       }
       for (const layer of badgeRefs.current) {
+        if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
+      }
+      for (const layer of tbRefs.current) {
         if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
       }
       docRef.current = null
@@ -849,8 +972,10 @@ export function PdfViewer({
     const timer = window.setTimeout(() => {
       const from = Math.max(1, currentPage - 2)
       const to = Math.min(numPages, currentPage + 3)
-      for (const highlight of highlights) {
-        if (highlight.page >= from && highlight.page <= to) void buildTextLayer(highlight.page)
+      for (const annotation of highlights) {
+        // Text boxes are fraction-anchored and need no text layer at all.
+        if (annotation.kind === 'text') continue
+        if (annotation.page >= from && annotation.page <= to) void buildTextLayer(annotation.page)
       }
       if (hits === null) return
       for (const hit of hits) {
@@ -860,8 +985,14 @@ export function PdfViewer({
     return () => window.clearTimeout(timer)
   }, [buildTextLayer, currentPage, hits, highlights, numPages, status])
 
-  // Starting a selection is what asks for a text layer on an arbitrary page.
+  // Starting a selection is what asks for a text layer on an arbitrary page. The
+  // text-box tool is a click-to-place gesture, so it neither selects nor spends a
+  // text-layer build on every press.
   const onMouseDown = useCallback((event: { target: EventTarget | null; clientX: number; clientY: number; button: number }): void => {
+    if (activeTool === 'text') {
+      gesture.current = null
+      return
+    }
     const page = event.button === 0 ? pageOfNode(event.target as Node | null, pageRefs.current) : null
     if (page === null) {
       gesture.current = null
@@ -877,7 +1008,30 @@ export function PdfViewer({
       scrollTop: scrollRef.current?.scrollTop ?? 0,
     }
     void buildTextLayer(page)
-  }, [buildTextLayer])
+  }, [activeTool, buildTextLayer])
+
+  // Any armed tool is escapable, whether or not the reader focused the page.
+  // A focused input/textarea keeps its own Escape (the note editor's close/commit).
+  useEffect(() => {
+    if (activeTool === null) return
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      const target = event.target
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return
+      }
+      setActiveTool(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeTool])
+
+  /** Arm or disarm one toolbar tool; arming one disarms the other and drops any open popover. */
+  const toggleTool = useCallback((tool: ActiveTool): void => {
+    setActiveTool(current => current === tool ? null : tool)
+    setSelection(null)
+  }, [])
 
   // Persist the position on the way out, including the last pending scroll.
   useEffect(() => () => {
@@ -1160,23 +1314,31 @@ export function PdfViewer({
     window.getSelection()?.removeAllRanges()
   }, [])
 
-  /** Turn a browser selection that lives inside one page into the action bar. */
-  const commitSelection = useCallback((browserSelection: Selection): boolean => {
+  /**
+   * Read a browser selection that lives inside one page: its quote, its page and
+   * the viewport point a popover should sit at. Null when the selection spans
+   * pages, is empty, or is only a caret.
+   */
+  const describeSelection = useCallback((browserSelection: Selection): ReaderSelection | null => {
+    if (browserSelection.isCollapsed) return null
     const quote = browserSelection.toString().trim()
     const anchorPage = pageOfNode(browserSelection.anchorNode, pageRefs.current)
     const focusPage = pageOfNode(browserSelection.focusNode, pageRefs.current)
-    if (quote === '' || anchorPage === null || focusPage === null || anchorPage !== focusPage) {
-      setSelection(null)
-      return false
-    }
+    if (quote === '' || anchorPage === null || focusPage === null || anchorPage !== focusPage) return null
     const rect = browserSelection.getRangeAt(0).getBoundingClientRect()
     const pane = scrollRef.current?.getBoundingClientRect()
     const left = pane?.left ?? 0
     const width = pane?.width ?? 360
     const x = Math.min(Math.max(rect.left + rect.width / 2, left + 12), left + width - 12)
-    setSelection({ page: anchorPage, quote: quote.slice(0, 2000), x, y: Math.max(rect.top, 12) })
-    return true
+    return { page: anchorPage, quote: quote.slice(0, 2000), x, y: Math.max(rect.top, 12) }
   }, [])
+
+  /** Turn a browser selection that lives inside one page into the action bar. */
+  const commitSelection = useCallback((browserSelection: Selection): boolean => {
+    const described = describeSelection(browserSelection)
+    setSelection(described)
+    return described !== null
+  }, [describeSelection])
 
   /**
    * A drag that started before its page had a text layer selects nothing, because
@@ -1214,9 +1376,11 @@ export function PdfViewer({
   }, [buildTextLayer, commitSelection])
 
   /**
-   * The topmost painted highlight under a viewport point on one page. The
+   * The topmost painted annotation under a viewport point on one page. The
    * overlay rectangles are `pointer-events: none` so text selection keeps
-   * working, hence this geometric hit test instead of an event target.
+   * working, hence this geometric hit test instead of an event target. An
+   * underline's click band is the whole untrimmed text box (the 2 px stroke alone
+   * would be nearly impossible to hit).
    */
   const highlightAt = useCallback((page: number, clientX: number, clientY: number): string | null => {
     const painted = hitRects.current.get(page)
@@ -1226,40 +1390,94 @@ export function PdfViewer({
     const x = clientX - pageRect.left
     const y = clientY - pageRect.top
     for (let index = painted.length - 1; index >= 0; index -= 1) {
+      const underline = painted[index].kind === 'underline'
       for (const box of painted[index].rects) {
-        if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h) return painted[index].id
+        const top = underline ? box.top : box.y
+        const bottom = underline ? box.bottom : box.y + box.h
+        if (x >= box.x && x <= box.x + box.w && y >= top && y <= bottom) return painted[index].id
       }
     }
     return null
   }, [])
 
-  // A fresh selection wins; a plain click on a painted highlight opens its note.
+  /** Create a quote-anchored annotation (highlight or underline) and confirm it visibly. */
+  const createMark = useCallback((kind: 'highlight' | 'underline', color: HighlightColor, quote: string, page: number): void => {
+    if (quote.trim() === '') return
+    onCreateAnnotation({ page, kind, color, quote })
+    clearSelection()
+    // A page whose text layer was released gets it back before the mark can be
+    // painted; buildTextLayer repaints annotations with the latest stored list.
+    void buildTextLayer(page)
+    announce(`${t(kind === 'underline' ? 'underlineSaved' : 'highlightSaved')} p.${page}`)
+  }, [announce, buildTextLayer, clearSelection, onCreateAnnotation, t])
+
+  /**
+   * Place a text box at a viewport point on one page.
+   *
+   * The stored anchor is a fraction of the page's unscaled width/height — never a
+   * pixel coordinate — so the same fraction puts the box back after any zoom. The
+   * box starts with empty content and its editor opens immediately; committing
+   * empty content deletes it again (and the Host drops empty boxes as well).
+   * Dragging is deliberately not supported: a drag on the page is the
+   * text-selection gesture, so a box is placed exactly where it was clicked and
+   * grows toward the page's interior near an edge.
+   */
+  const createTextBox = useCallback((page: number, clientX: number, clientY: number): void => {
+    const pageEl = pageRefs.current[page - 1]
+    if (pageEl === null || pageEl === undefined) return
+    const rect = pageEl.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return
+    const id = onCreateAnnotation({
+      page,
+      kind: 'text',
+      color: toolColor,
+      quote: '',
+      text: '',
+      xPct: clampFraction((clientX - rect.left) / rect.width),
+      yPct: clampFraction((clientY - rect.top) / rect.height),
+    })
+    if (id === '') return
+    setNoteEditor({ id, kind: 'text', value: '', x: clientX, y: clientY })
+  }, [onCreateAnnotation, toolColor])
+
+  // A fresh selection wins; a plain click opens the annotation under it (or, with
+  // the text-box tool armed, places a box on an empty spot).
   const onMouseUp = useCallback((event: { clientX: number; clientY: number; button: number; target: EventTarget | null }): void => {
     const started = gesture.current
     gesture.current = null
     const browserSelection = window.getSelection()
     if (browserSelection !== null && !browserSelection.isCollapsed) {
+      if (activeTool === 'underline') {
+        // The underline tool turns a selection straight into a mark: no action bar.
+        const described = describeSelection(browserSelection)
+        if (described !== null) createMark('underline', toolColor, described.quote, described.page)
+        return
+      }
       commitSelection(browserSelection)
       return
     }
     setSelection(null)
     const page = pageOfNode(event.target as Node | null, pageRefs.current)
     const clickedId = page === null ? null : highlightAt(page, event.clientX, event.clientY)
-    if (clickedId === null) {
-      // Nothing selected after a real drag means the layer was still being built
-      // when the gesture began; replay it rather than failing silently.
-      if (
-        started !== null &&
-        event.button === 0 &&
-        !started.hadLayer &&
-        (Math.abs(event.clientX - started.x) > 4 || Math.abs(event.clientY - started.y) > 4)
-      ) {
-        replaySelection(started, event.clientX, event.clientY)
-      }
+    if (clickedId !== null) {
+      openNoteEditor(clickedId, event.clientX, event.clientY)
       return
     }
-    openNoteEditor(clickedId, event.clientX, event.clientY)
-  }, [commitSelection, highlightAt, openNoteEditor, replaySelection])
+    if (page !== null && event.button === 0 && activeTool === 'text') {
+      createTextBox(page, event.clientX, event.clientY)
+      return
+    }
+    // Nothing selected after a real drag means the layer was still being built
+    // when the gesture began; replay it rather than failing silently.
+    if (
+      started !== null &&
+      event.button === 0 &&
+      !started.hadLayer &&
+      (Math.abs(event.clientX - started.x) > 4 || Math.abs(event.clientY - started.y) > 4)
+    ) {
+      replaySelection(started, event.clientX, event.clientY)
+    }
+  }, [activeTool, commitSelection, createMark, createTextBox, describeSelection, highlightAt, openNoteEditor, replaySelection, toolColor])
 
   const selectionAction = useCallback((action: 'quote' | 'explain' | 'translate' | 'copy'): void => {
     if (selection === null) return
@@ -1270,17 +1488,11 @@ export function PdfViewer({
     clearSelection()
   }, [clearSelection, onAsk, onQuote, selection])
 
-  /** Create a highlight from the current selection and confirm it visibly. */
+  /** Create a highlight from the action bar's current selection. */
   const createHighlight = useCallback((color: HighlightColor): void => {
     if (selection === null) return
-    const page = selection.page
-    onCreateHighlight({ page, color, quote: selection.quote })
-    clearSelection()
-    // A page whose text layer was released gets it back before the mark can be
-    // painted; buildTextLayer repaints highlights with the latest stored list.
-    void buildTextLayer(page)
-    announce(`${t('highlightSaved')} p.${page}`)
-  }, [announce, buildTextLayer, clearSelection, onCreateHighlight, selection, t])
+    createMark('highlight', color, selection.quote, selection.page)
+  }, [createMark, selection])
 
   /**
    * Run a selection-popover action on the press itself, with the press's default
@@ -1300,30 +1512,59 @@ export function PdfViewer({
     return { onPointerDown: press, onClick: press }
   }, [])
 
+  /**
+   * Commit the open editor.
+   *
+   * A highlight/underline saves its margin note (the previous behaviour). A text
+   * box saves its content and deletes itself when that content is empty: an empty
+   * box would be an invisible annotation, and the Host drops one as well.
+   */
   const saveNote = useCallback((): void => {
-    if (noteEditor !== null) onUpdateNote(noteEditor.id, noteEditor.note)
+    if (noteEditor === null) return
+    if (noteEditor.kind === 'text') {
+      const value = noteEditor.value.trim()
+      if (value === '') {
+        onDeleteAnnotation(noteEditor.id)
+        setNoteEditor(null)
+        return
+      }
+      onUpdateTextBox(noteEditor.id, value)
+      const page = highlightsRef.current.find(annotation => annotation.id === noteEditor.id)?.page
+      if (page !== undefined) announce(`${t('textBoxSaved')} p.${page}`)
+      setNoteEditor(null)
+      return
+    }
+    onUpdateNote(noteEditor.id, noteEditor.value)
     setNoteEditor(null)
-  }, [noteEditor, onUpdateNote])
+  }, [announce, noteEditor, onDeleteAnnotation, onUpdateNote, onUpdateTextBox, t])
 
   /**
-   * Reveal one stored highlight: scroll it near the top of the pane, not to its
-   * page top, and open its note editor. Geometry is only available on a built
-   * text layer, so a cold page gets built on demand; the retry is bounded and
-   * falls back to the page jump when the quote cannot be located at all.
+   * Reveal one stored annotation: scroll it near the top of the pane, not to its
+   * page top, and open its editor. A text box's position is a page fraction, so it
+   * needs no text layer; a highlight/underline's geometry needs a built layer, so a
+   * cold page gets one on demand, with a bounded retry that falls back to the page
+   * jump when the quote cannot be located at all.
    */
-  const scrollToHighlight = useCallback((highlight: Highlight): void => {
-    const page = Math.min(Math.max(1, highlight.page), Math.max(1, numPages))
+  const revealAnnotation = useCallback((annotation: Highlight): void => {
+    const page = Math.min(Math.max(1, annotation.page), Math.max(1, numPages))
     const openEditor = (): void => {
       const pane = scrollRef.current?.getBoundingClientRect()
-      openNoteEditor(highlight.id, (pane?.left ?? 8) + 8, 140)
+      openNoteEditor(annotation.id, (pane?.left ?? 8) + 8, 140)
     }
     const reveal = (): boolean => {
       const scroller = scrollRef.current
       const pageEl = pageRefs.current[page - 1]
-      const painted = hitRects.current.get(page)?.find(entry => entry.id === highlight.id)
-      if (scroller === null || pageEl === null || pageEl === undefined || painted === undefined || painted.rects.length === 0) return false
+      if (scroller === null || pageEl === null || pageEl === undefined) return false
       const top = offsetsRef.current[page - 1] ?? pageEl.offsetTop
-      scroller.scrollTop = Math.max(0, top + painted.rects[0].y - HIGHLIGHT_REVEAL_OFFSET)
+      let target: number
+      if (annotation.kind === 'text') {
+        target = top + clampFraction(annotation.yPct) * pageEl.offsetHeight
+      } else {
+        const painted = hitRects.current.get(page)?.find(entry => entry.id === annotation.id)
+        if (painted === undefined || painted.rects.length === 0) return false
+        target = top + painted.rects[0].y
+      }
+      scroller.scrollTop = Math.max(0, target - HIGHLIGHT_REVEAL_OFFSET)
       if (page !== currentPageRef.current) {
         setCurrentPage(page)
         savePosition(page)
@@ -1332,6 +1573,11 @@ export function PdfViewer({
     }
     setShowNotes(false)
     if (reveal()) {
+      openEditor()
+      return
+    }
+    if (annotation.kind === 'text') {
+      jumpTo(page)
       openEditor()
       return
     }
@@ -1423,8 +1669,26 @@ export function PdfViewer({
       // Note badges sit above the text layer (only the dots take pointer events),
       // in the right page margin, repainted with the rectangle overlay.
       h('div', { className: 'pr-badge-layer', ref: (element: HTMLDivElement | null): void => { badgeRefs.current[index] = element } }),
+      // Text boxes ride above the text layer: a box only takes pointer events over
+      // its own area, so the rest of the page stays selectable.
+      h('div', { className: 'pr-tb-layer', ref: (element: HTMLDivElement | null): void => { tbRefs.current[index] = element } }),
     )
   }), [numPages, scale, sizes])
+
+  /** The notes list's label for one annotation kind (distinguishable at a glance). */
+  const annotationKindLabel = (kind: AnnotationKind): string => {
+    if (kind === 'underline') return t('underline')
+    if (kind === 'text') return t('textBox')
+    return t('highlight')
+  }
+
+  /** One notes-list row: kind, page, the anchor text and the margin note when there is one. */
+  const annotationRowText = (annotation: Highlight): string => {
+    const body = annotation.kind === 'text' ? (annotation.text ?? '') : annotation.quote
+    const clipped = body.length > 40 ? `${body.slice(0, 40)}…` : body
+    const note = annotation.kind === 'text' || annotation.note === '' ? '' : ` — ${annotation.note}`
+    return `${annotationKindLabel(annotation.kind)} · p.${annotation.page} · ${clipped}${note}`
+  }
 
   return h('div', { className: 'pr-root', ref: rootRef },
     h('style', null, VIEWER_CSS),
@@ -1441,6 +1705,17 @@ export function PdfViewer({
         type: 'button', className: 'pr-btn', title: t('notes'), 'aria-pressed': showNotes ? 'true' : 'false',
         onClick: () => { setShowNotes(value => !value); setShowSearch(false); setShowOutline(false) },
       }, t('notes')),
+      // Annotation tools are exclusive toggles; a second click (or Escape) disarms them.
+      h('button', {
+        type: 'button', className: 'pr-btn', title: t('underlineHint'),
+        'aria-pressed': activeTool === 'underline' ? 'true' : 'false',
+        onClick: () => toggleTool('underline'),
+      }, t('underline')),
+      h('button', {
+        type: 'button', className: 'pr-btn', title: t('textBoxHint'),
+        'aria-pressed': activeTool === 'text' ? 'true' : 'false',
+        onClick: () => toggleTool('text'),
+      }, t('textBox')),
       h('button', {
         type: 'button', className: 'pr-btn', title: t('digest'), onClick: generateDigest,
       }, t('digest')),
@@ -1451,6 +1726,20 @@ export function PdfViewer({
       h('button', { type: 'button', className: 'pr-btn', title: t('zoomIn'), onClick: () => zoomBy(1.2) }, '+'),
       h('button', { type: 'button', className: 'pr-btn', title: t('fitWidth'), onClick: fitWidth }, '⤢'),
       toast !== '' && h('span', { className: 'pr-toast', role: 'status' }, toast),
+    ),
+    // The underline tool's stroke colour: its own strip, so the toolbar itself
+    // does not grow when the palette is shown.
+    activeTool === 'underline' && h('div', { className: 'pr-bar pr-color-bar' },
+      h('span', { className: 'pr-tool-label' }, t('underline')),
+      ...COLORS.map(color => h('button', {
+        key: color,
+        type: 'button',
+        className: 'pr-swatch',
+        'data-color': color,
+        title: t('underline'),
+        'aria-pressed': toolColor === color ? 'true' : 'false',
+        onClick: () => setToolColor(color),
+      })),
     ),
     showSearch && h('div', { className: 'pr-bar' },
       h('input', {
@@ -1488,12 +1777,12 @@ export function PdfViewer({
     ),
     showNotes && h('div', { className: 'pr-list' },
       highlights.length === 0 && h('div', { className: 'pr-hint' }, t('notesEmpty')),
-      highlights.map(highlight => h('button', {
-        key: highlight.id,
+      highlights.map(annotation => h('button', {
+        key: annotation.id,
         type: 'button',
         className: 'pr-row',
-        onClick: () => scrollToHighlight(highlight),
-      }, `p.${highlight.page} · ${highlight.quote.slice(0, 40)}${highlight.quote.length > 40 ? '…' : ''}${highlight.note === '' ? '' : ` — ${highlight.note}`}`)),
+        onClick: () => revealAnnotation(annotation),
+      }, annotationRowText(annotation))),
     ),
     h('div', { className: 'pr-pages', ref: scrollRef, onScroll, onMouseUp, onMouseDown },
       status === 'loading' && h('div', { className: 'pr-status' }, t('loading')),
@@ -1507,14 +1796,17 @@ export function PdfViewer({
       style: { left: `${selection.x}px`, top: `${selection.y - 10}px` },
       onMouseDown: (event: { preventDefault(): void }) => event.preventDefault(),
     },
-      ...COLORS.map(color => h('button', {
-        key: color,
-        type: 'button',
-        className: 'pr-swatch',
-        'data-color': color,
-        title: t('highlight'),
-        ...pressAction(() => createHighlight(color)),
-      })),
+      // Eight colours in a 4×2 palette keep the popover compact.
+      h('div', { className: 'pr-swatches' },
+        ...COLORS.map(color => h('button', {
+          key: color,
+          type: 'button',
+          className: 'pr-swatch',
+          'data-color': color,
+          title: t('highlight'),
+          ...pressAction(() => createHighlight(color)),
+        })),
+      ),
       h('button', { type: 'button', className: 'pr-btn', ...pressAction(() => selectionAction('quote')) }, t('quoteAction')),
       h('button', { type: 'button', className: 'pr-btn', ...pressAction(() => selectionAction('explain')) }, t('explain')),
       h('button', { type: 'button', className: 'pr-btn', ...pressAction(() => selectionAction('translate')) }, t('translate')),
@@ -1524,21 +1816,39 @@ export function PdfViewer({
       className: 'pr-note',
       style: { left: `${Math.max(8, Math.min(noteEditor.x, window.innerWidth - 240))}px`, top: `${Math.max(8, noteEditor.y - 20)}px` },
     },
+      // The same editor serves both bodies: a margin note, or a text box's content.
+      noteEditor.kind === 'text' && h('div', { className: 'pr-note-label' }, t('textBoxEditorLabel')),
       h('textarea', {
         className: 'pr-note-input',
-        value: noteEditor.note,
-        placeholder: t('notePlaceholder'),
+        value: noteEditor.value,
+        placeholder: noteEditor.kind === 'text' ? t('textBoxPlaceholder') : t('notePlaceholder'),
         autoFocus: true,
-        onKeyDown: (event: { key: string; currentTarget: { blur(): void } }) => {
-          if (event.key === 'Escape') { event.currentTarget.blur(); setNoteEditor(null) }
+        onBlur: () => {
+          // Blur commits a text box (empty content deletes it); a margin note keeps
+          // its explicit Save/Escape behaviour.
+          if (noteEditor.kind === 'text') saveNote()
         },
-        onChange: (event: { currentTarget: { value: string } }) => setNoteEditor({ ...noteEditor, note: event.currentTarget.value }),
+        onKeyDown: (event: { key: string; currentTarget: { blur(): void } }) => {
+          if (event.key !== 'Escape') return
+          if (noteEditor.kind === 'text') {
+            saveNote()
+            return
+          }
+          event.currentTarget.blur()
+          setNoteEditor(null)
+        },
+        onChange: (event: { currentTarget: { value: string } }) => setNoteEditor({ ...noteEditor, value: event.currentTarget.value }),
       }),
-      h('div', { className: 'pr-note-actions' },
+      h('div', {
+        className: 'pr-note-actions',
+        // Keep focus in the textarea while a button is pressed, so a Save/Delete
+        // click does not first trigger the blur commit and unmount its own button.
+        onMouseDown: (event: { preventDefault(): void }) => event.preventDefault(),
+      },
         h('button', { type: 'button', className: 'pr-btn', onClick: saveNote }, t('noteSave')),
         h('button', {
           type: 'button', className: 'pr-btn',
-          onClick: () => { onDeleteHighlight(noteEditor.id); setNoteEditor(null); dismissToast() },
+          onClick: () => { onDeleteAnnotation(noteEditor.id); setNoteEditor(null); dismissToast() },
         }, t('noteDelete')),
       ),
     ),

@@ -10,6 +10,7 @@
  * Storage lives under the DSH home, never in the user's workspace.
  */
 import { unlink } from 'node:fs/promises'
+import { sanitizeStoredAnnotation, type StoredAnnotation } from '../shared/annotationModel.ts'
 import { ArxivRequestError, fetchArxivPaper, searchArxiv } from './arxiv.ts'
 import { disposeOcr, recognizePage } from './ocr/index.ts'
 import { annotationPath, paperPaths, readBytes, readJson, writeBytes, writeJson } from './store.ts'
@@ -50,16 +51,9 @@ const JSON_BODY_LIMIT = 2 * 1024 * 1024
 const PDF_BODY_LIMIT = 32 * 1024 * 1024
 /** One rendered page image (PNG) from the reader's canvas. */
 const OCR_BODY_LIMIT = 8 * 1024 * 1024
-const COLORS = new Set(['yellow', 'green', 'blue', 'pink'])
 
-interface Highlight {
-  readonly id: string
-  readonly page: number
-  readonly quote: string
-  readonly note: string
-  readonly color: string
-  readonly createdAt: number
-}
+/** One stored annotation: a highlight, an underline or a text box. */
+type Highlight = StoredAnnotation
 
 /** Only a page served from this machine may reach the storage routes. */
 function isLoopbackHost(host: string | string[] | undefined): boolean {
@@ -211,21 +205,18 @@ class BadRequestError extends Error {
   }
 }
 
+/**
+ * Normalise one annotation before it is stored or answered.
+ *
+ * `kind` is preserved and validated: a missing or unknown kind reads as
+ * `highlight` (every file and every Client written before the field existed), a
+ * text box needs a numeric `xPct`/`yPct` (clamped into 0–1) and non-empty
+ * `text`, and a colour outside the shared palette falls back to yellow. The
+ * rules live in `../shared/annotationModel.ts` so the Client's palette, its
+ * repaint logic and this Host allow-list cannot drift apart.
+ */
 function sanitizeHighlight(value: unknown): Highlight | null {
-  if (value === null || typeof value !== 'object') return null
-  const input = value as Record<string, unknown>
-  const id = typeof input.id === 'string' && input.id.length <= 80 ? input.id : null
-  const page = typeof input.page === 'number' && Number.isInteger(input.page) && input.page > 0 ? input.page : null
-  const quote = typeof input.quote === 'string' ? input.quote.slice(0, 2000) : null
-  if (id === null || page === null || quote === null || quote === '') return null
-  return {
-    id,
-    page,
-    quote,
-    note: typeof input.note === 'string' ? input.note.slice(0, 4000) : '',
-    color: typeof input.color === 'string' && COLORS.has(input.color) ? input.color : 'yellow',
-    createdAt: typeof input.createdAt === 'number' && Number.isFinite(input.createdAt) ? input.createdAt : Date.now(),
-  }
+  return sanitizeStoredAnnotation(value)
 }
 
 export const inject = ['webServer', 'tools']

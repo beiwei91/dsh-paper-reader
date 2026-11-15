@@ -10,21 +10,54 @@
  * newest state with `keepalive` so the browser gets one last chance to deliver it.
  * A failed load or save becomes a visible problem and is retried with bounded
  * backoff instead of only reaching the console.
+ *
+ * One annotation can be a highlight, an underline or a text box; the Host runs the
+ * shared sanitiser on both reads and writes, and this hook runs it again on load so
+ * the Client never has to trust an older Host's response shape. The array and the
+ * route keep their historical names.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { clampFraction, sanitizeStoredAnnotation } from '../shared/annotationModel.ts'
 import { createAnnotationSaveQueue, retryDelay } from './annotationQueue.ts'
-import type { AnnotationProblem, AnnotationSaveQueue, Highlight, HighlightColor, SaveResult } from './annotationQueue.ts'
+import type {
+  AnnotationProblem,
+  AnnotationSaveQueue,
+  Highlight,
+  HighlightColor,
+  QuoteAnnotationKind,
+  SaveResult,
+} from './annotationQueue.ts'
 
-export type { AnnotationProblem, Highlight, HighlightColor } from './annotationQueue.ts'
+export type { AnnotationKind, AnnotationProblem, Highlight, HighlightColor } from './annotationQueue.ts'
 
 const API = '/paper-reader/api/annotations'
 const LOAD_ATTEMPTS = 3
 
+/** What a new annotation is made of, whichever kind it is. */
+export interface AddAnnotationInput {
+  readonly page: number
+  readonly kind: QuoteAnnotationKind | 'text'
+  readonly color: HighlightColor
+  /** The selected passage (highlight/underline only). */
+  readonly quote?: string
+  /** Text box only: the box's content (may start empty, then be edited). */
+  readonly text?: string
+  /** Text box only: fraction of the page's unscaled width/height. */
+  readonly xPct?: number
+  readonly yPct?: number
+}
+
 export interface UseAnnotationsResult {
   readonly highlights: Highlight[]
-  addHighlight(input: { page: number; color: HighlightColor; quote: string }): void
+  /**
+   * Add one annotation and return its id (`''` when a quote-anchored one had no
+   * quote). The caller uses the id to open the editor for a fresh text box.
+   */
+  addAnnotation(input: AddAnnotationInput): string
   updateNote(id: string, note: string): void
-  removeHighlight(id: string): void
+  /** Replace a text box's content; empty content deletes the annotation. */
+  updateTextBox(id: string, text: string): void
+  removeAnnotation(id: string): void
   /**
    * Send the newest state now. The normal queue retries and reports failures;
    * pass `true` on a teardown path so the request survives the page going away.
@@ -39,7 +72,7 @@ type LoadResult =
   | { readonly ok: false; readonly status: number | null; readonly code: string | null }
 
 function newId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `hl-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return globalThis.crypto?.randomUUID?.() ?? `an-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 async function putAnnotations(write: { key: string; highlights: Highlight[] }, keepalive: boolean): Promise<SaveResult> {
@@ -66,8 +99,14 @@ async function fetchAnnotations(key: string): Promise<LoadResult> {
       return { ok: false, status: response.status, code: typeof detail?.error === 'string' ? detail.error : null }
     }
     const body = (await response.json()) as { highlights?: unknown }
-    // The Host already sanitises every stored highlight before it answers.
-    return { ok: true, highlights: Array.isArray(body.highlights) ? body.highlights as Highlight[] : [] }
+    // The Host sanitises every stored annotation before it answers; running the
+    // same shared sanitiser again means an old Host's response (no `kind`, four
+    // colours) still yields a renderable list instead of crashing the viewer.
+    const raw = Array.isArray(body.highlights) ? body.highlights : []
+    const highlights = raw
+      .map(item => sanitizeStoredAnnotation(item))
+      .filter((item): item is Highlight => item !== null)
+    return { ok: true, highlights }
   } catch {
     return { ok: false, status: null, code: null }
   }
@@ -175,26 +214,56 @@ export function useAnnotations(storageKey: string | null): UseAnnotationsResult 
     queueRef.current?.enqueue(key, next)
   }, [])
 
-  const addHighlight = useCallback((input: { page: number; color: HighlightColor; quote: string }): void => {
-    const quote = input.quote.trim()
-    if (quote === '') return
+  const removeAnnotation = useCallback((id: string): void => {
+    commit(current.current.filter(annotation => annotation.id !== id))
+  }, [commit])
+
+  const addAnnotation = useCallback((input: AddAnnotationInput): string => {
+    const id = newId()
+    const page = Math.max(1, Math.floor(input.page))
+    if (input.kind === 'text') {
+      commit([...current.current, {
+        id,
+        kind: 'text',
+        page,
+        color: input.color,
+        quote: '',
+        note: '',
+        createdAt: Date.now(),
+        xPct: clampFraction(input.xPct),
+        yPct: clampFraction(input.yPct),
+        text: input.text ?? '',
+      }])
+      return id
+    }
+    const quote = (input.quote ?? '').trim()
+    if (quote === '') return ''
     commit([...current.current, {
-      id: newId(),
-      page: input.page,
+      id,
+      kind: input.kind,
+      page,
       color: input.color,
       quote,
       note: '',
       createdAt: Date.now(),
     }])
+    return id
   }, [commit])
 
   const updateNote = useCallback((id: string, note: string): void => {
-    commit(current.current.map(highlight => highlight.id === id ? { ...highlight, note } : highlight))
+    commit(current.current.map(annotation => annotation.id === id ? { ...annotation, note } : annotation))
   }, [commit])
 
-  const removeHighlight = useCallback((id: string): void => {
-    commit(current.current.filter(highlight => highlight.id !== id))
-  }, [commit])
+  const updateTextBox = useCallback((id: string, text: string): void => {
+    const value = text.trim()
+    if (value === '') {
+      removeAnnotation(id)
+      return
+    }
+    commit(current.current.map(annotation =>
+      annotation.id === id && annotation.kind === 'text' ? { ...annotation, text: value } : annotation,
+    ))
+  }, [commit, removeAnnotation])
 
-  return { highlights, addHighlight, updateNote, removeHighlight, flush, loadProblem, saveProblem }
+  return { highlights, addAnnotation, updateNote, updateTextBox, removeAnnotation, flush, loadProblem, saveProblem }
 }

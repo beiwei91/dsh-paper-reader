@@ -16,16 +16,22 @@
  *  - `flush(true)` sends every key's newest state immediately, for teardown paths,
  *    even while another PUT is in flight.
  */
-export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink'
+import type { AnnotationColor, AnnotationKind, StoredAnnotation } from '../shared/annotationModel.ts'
 
-export interface Highlight {
-  readonly id: string
-  readonly page: number
-  readonly color: HighlightColor
-  readonly quote: string
-  readonly note: string
-  readonly createdAt: number
-}
+export type { AnnotationKind } from '../shared/annotationModel.ts'
+
+/**
+ * One annotation stored for a paper. The type keeps its historical name (and the
+ * array keeps its historical name) although it now carries `kind` and the text
+ * box's fraction anchor; see `../shared/annotationModel.ts`.
+ */
+export type Highlight = StoredAnnotation
+
+/** The palette lives in the shared model so the Host allow-list cannot drift. */
+export type HighlightColor = AnnotationColor
+
+/** The kinds that anchor to a selected quote (everything but a text box). */
+export type QuoteAnnotationKind = Exclude<AnnotationKind, 'text'>
 
 /** One save failure, in the shape the body turns into a visible status line. */
 export interface AnnotationProblem {

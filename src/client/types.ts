@@ -87,6 +87,14 @@ export type PaperReaderLocaleKey =
   | 'recentTitle'
   | 'recentRemove'
   | 'recentOpenFailed'
+  | 'underline'
+  | 'underlineHint'
+  | 'textBox'
+  | 'textBoxHint'
+  | 'underlineSaved'
+  | 'textBoxSaved'
+  | 'textBoxPlaceholder'
+  | 'textBoxEditorLabel'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {

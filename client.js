@@ -37,6 +37,46 @@ var import_react2 = require("react");
 // src/client/annotations.ts
 var import_react = require("react");
 
+// src/shared/annotationModel.ts
+var ANNOTATION_KINDS = ["highlight", "underline", "text"];
+var ANNOTATION_COLORS = ["yellow", "green", "blue", "pink", "orange", "purple", "cyan", "red"];
+var DEFAULT_ANNOTATION_KIND = "highlight";
+var DEFAULT_ANNOTATION_COLOR = "yellow";
+var MAX_ANNOTATION_ID = 80;
+var MAX_ANNOTATION_QUOTE = 2e3;
+var MAX_ANNOTATION_NOTE = 4e3;
+var MAX_ANNOTATION_TEXT = 4e3;
+function annotationKindOf(value) {
+  return typeof value === "string" && ANNOTATION_KINDS.includes(value) ? value : DEFAULT_ANNOTATION_KIND;
+}
+function annotationColorOf(value) {
+  return typeof value === "string" && ANNOTATION_COLORS.includes(value) ? value : DEFAULT_ANNOTATION_COLOR;
+}
+function clampFraction(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+function sanitizeStoredAnnotation(value) {
+  if (value === null || typeof value !== "object") return null;
+  const input = value;
+  const id = typeof input.id === "string" && input.id.length <= MAX_ANNOTATION_ID ? input.id : null;
+  const page = typeof input.page === "number" && Number.isInteger(input.page) && input.page > 0 ? input.page : null;
+  if (id === null || page === null) return null;
+  const kind = annotationKindOf(input.kind);
+  const color = annotationColorOf(input.color);
+  const note = typeof input.note === "string" ? input.note.slice(0, MAX_ANNOTATION_NOTE) : "";
+  const createdAt = typeof input.createdAt === "number" && Number.isFinite(input.createdAt) ? input.createdAt : Date.now();
+  if (kind === "text") {
+    const anchored = typeof input.xPct === "number" && Number.isFinite(input.xPct) && typeof input.yPct === "number" && Number.isFinite(input.yPct);
+    const text = typeof input.text === "string" ? input.text.slice(0, MAX_ANNOTATION_TEXT) : "";
+    if (!anchored || text.trim() === "") return null;
+    return { id, kind, page, color, quote: "", note, createdAt, xPct: clampFraction(input.xPct), yPct: clampFraction(input.yPct), text };
+  }
+  const quote = typeof input.quote === "string" ? input.quote.slice(0, MAX_ANNOTATION_QUOTE) : "";
+  if (quote === "") return null;
+  return { id, kind, page, color, quote, note, createdAt };
+}
+
 // src/client/annotationQueue.ts
 var SAVE_ATTEMPTS = 6;
 var RETRY_BASE_MS = 500;
@@ -130,7 +170,7 @@ function createAnnotationSaveQueue(deps) {
 var API = "/paper-reader/api/annotations";
 var LOAD_ATTEMPTS = 3;
 function newId() {
-  return globalThis.crypto?.randomUUID?.() ?? `hl-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return globalThis.crypto?.randomUUID?.() ?? `an-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 async function putAnnotations(write, keepalive) {
   try {
@@ -155,7 +195,9 @@ async function fetchAnnotations(key) {
       return { ok: false, status: response.status, code: typeof detail?.error === "string" ? detail.error : null };
     }
     const body = await response.json();
-    return { ok: true, highlights: Array.isArray(body.highlights) ? body.highlights : [] };
+    const raw = Array.isArray(body.highlights) ? body.highlights : [];
+    const highlights = raw.map((item) => sanitizeStoredAnnotation(item)).filter((item) => item !== null);
+    return { ok: true, highlights };
   } catch {
     return { ok: false, status: null, code: null };
   }
@@ -251,25 +293,54 @@ function useAnnotations(storageKey) {
     if (key === null || key === "") return;
     queueRef.current?.enqueue(key, next);
   }, []);
-  const addHighlight = (0, import_react.useCallback)((input) => {
-    const quote = input.quote.trim();
-    if (quote === "") return;
+  const removeAnnotation = (0, import_react.useCallback)((id) => {
+    commit(current.current.filter((annotation) => annotation.id !== id));
+  }, [commit]);
+  const addAnnotation = (0, import_react.useCallback)((input) => {
+    const id = newId();
+    const page = Math.max(1, Math.floor(input.page));
+    if (input.kind === "text") {
+      commit([...current.current, {
+        id,
+        kind: "text",
+        page,
+        color: input.color,
+        quote: "",
+        note: "",
+        createdAt: Date.now(),
+        xPct: clampFraction(input.xPct),
+        yPct: clampFraction(input.yPct),
+        text: input.text ?? ""
+      }]);
+      return id;
+    }
+    const quote = (input.quote ?? "").trim();
+    if (quote === "") return "";
     commit([...current.current, {
-      id: newId(),
-      page: input.page,
+      id,
+      kind: input.kind,
+      page,
       color: input.color,
       quote,
       note: "",
       createdAt: Date.now()
     }]);
+    return id;
   }, [commit]);
   const updateNote = (0, import_react.useCallback)((id, note) => {
-    commit(current.current.map((highlight) => highlight.id === id ? { ...highlight, note } : highlight));
+    commit(current.current.map((annotation) => annotation.id === id ? { ...annotation, note } : annotation));
   }, [commit]);
-  const removeHighlight = (0, import_react.useCallback)((id) => {
-    commit(current.current.filter((highlight) => highlight.id !== id));
-  }, [commit]);
-  return { highlights, addHighlight, updateNote, removeHighlight, flush, loadProblem, saveProblem };
+  const updateTextBox = (0, import_react.useCallback)((id, text) => {
+    const value = text.trim();
+    if (value === "") {
+      removeAnnotation(id);
+      return;
+    }
+    commit(current.current.map(
+      (annotation) => annotation.id === id && annotation.kind === "text" ? { ...annotation, text: value } : annotation
+    ));
+  }, [commit, removeAnnotation]);
+  return { highlights, addAnnotation, updateNote, updateTextBox, removeAnnotation, flush, loadProblem, saveProblem };
 }
 
 // src/client/pdf/styles.ts
@@ -297,7 +368,7 @@ var BODY_CSS = `
 .pr-head{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:5px 6px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08))}
 .pr-name{flex:1 1 auto;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary,#57606a)}
 /* Recently opened papers: a compact list under the open forms. */
-.pr-recent{width:100%;max-width:420px;display:flex;flex-direction:column;gap:1px;text-align:left}
+.pr-recent{width:100%;max-width:420px;max-height:40vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;text-align:left}
 .pr-recent-title{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b949e);padding:2px 6px}
 .pr-recent-row{display:flex;align-items:center;gap:2px;border-radius:6px}
 .pr-recent-row:hover{background:var(--dsw-alias-bg-hover,rgba(0,0,0,.06))}
@@ -305,7 +376,7 @@ var BODY_CSS = `
 .pr-recent-row:hover .pr-recent-open{color:var(--dsw-alias-label-primary,#1f2328)}
 .pr-recent-open:disabled{opacity:.5;cursor:default}
 .pr-recent-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pr-recent-x{flex:0 0 auto;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#8b949e);font:inherit;font-size:13px;line-height:1;cursor:pointer;opacity:0}
+.pr-recent-x{flex:0 0 auto;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#8b949e);font:inherit;font-size:13px;line-height:1;cursor:pointer;opacity:0;display:flex;align-items:center;justify-content:center}
 .pr-recent-row:hover .pr-recent-x,.pr-recent-x:focus-visible{opacity:1}
 .pr-recent-x:hover{color:var(--dsw-alias-label-primary,#1f2328);background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.09))}
 `;
@@ -672,6 +743,13 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
       }
       if (!alive.current || sequence !== openSeq.current) return;
       remember({ name: entry.name, storageKey: entry.key, bytes, hostStored, readPath, kind: entry.kind });
+      if (hostStored && sessionId !== void 0 && sessionId !== "") {
+        void fetch("/paper-reader/api/current", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, key: entry.key, title: entry.name })
+        }).catch(() => void 0);
+      }
     } catch (reason) {
       if (!alive.current || sequence !== openSeq.current) return;
       console.warn("[paper-reader] recent paper reopen failed", reason);
@@ -799,9 +877,10 @@ ${instruction}`);
         // The tab type keeps this body mounted while another right-sidebar tab
         // is in front; the viewer uses this to release its heavy resources.
         visible: tab.visible,
-        onCreateHighlight: annotations.addHighlight,
+        onCreateAnnotation: annotations.addAnnotation,
         onUpdateNote: annotations.updateNote,
-        onDeleteHighlight: annotations.removeHighlight,
+        onUpdateTextBox: annotations.updateTextBox,
+        onDeleteAnnotation: annotations.removeAnnotation,
         onQuote: quote,
         onAsk: ask,
         onDigest: deliverDigest
@@ -1005,6 +1084,7 @@ var zh = {
   digestOcrYes: "\u6709\uFF08\u53EF\u641C\u7D22\uFF09",
   digestOcrNo: "\u65E0",
   digestNone: "\u65E0",
+  digestUnavailable: "\u6682\u4E0D\u53EF\u7528",
   digestInstructions: `\u3010\u8981\u6C42\u3011
 - \u7528\u53EA\u8BFB\u5DE5\u5177 paper_info\u3001paper_outline\u3001paper_read\u3001paper_search \u8BFB\u53D6\u8FD9\u7BC7\u8BBA\u6587\uFF1B\u5148\u770B\u6458\u8981\u3001\u7ED3\u8BBA\u4E0E\u76EE\u5F55\uFF0C\u518D\u6309\u9700\u7CBE\u8BFB\u5173\u952E\u7AE0\u8282\u3002
 - \u6309\u4E0B\u9762\u5C0F\u8282\u8F93\u51FA\uFF1B\u6CA1\u6709\u4F9D\u636E\u7684\u5199\u300C\u672A\u63D0\u53CA\u300D\uFF0C\u4E0D\u8981\u7F16\u9020\uFF1A
@@ -1021,7 +1101,15 @@ var zh = {
   digestFailed: "\u65E0\u6CD5\u5199\u5165\u8F93\u5165\u6846\u6216\u526A\u8D34\u677F",
   recentTitle: "\u6700\u8FD1\u6253\u5F00",
   recentRemove: "\u4ECE\u5217\u8868\u79FB\u9664",
-  recentOpenFailed: "\u65E0\u6CD5\u91CD\u65B0\u6253\u5F00\u8FD9\u7BC7\u8BBA\u6587\uFF0C\u8BB0\u5F55\u5DF2\u4FDD\u7559"
+  recentOpenFailed: "\u65E0\u6CD5\u91CD\u65B0\u6253\u5F00\u8FD9\u7BC7\u8BBA\u6587\uFF0C\u8BB0\u5F55\u5DF2\u4FDD\u7559",
+  underline: "\u4E0B\u5212\u7EBF",
+  underlineHint: "\u9009\u62E9\u6587\u5B57\u5373\u53EF\u52A0\u4E0B\u5212\u7EBF\uFF08Esc \u9000\u51FA\uFF09",
+  textBox: "\u6587\u672C\u6846",
+  textBoxHint: "\u70B9\u51FB\u9875\u9762\u7A7A\u767D\u5904\u653E\u7F6E\u6587\u672C\u6846\uFF08Esc \u9000\u51FA\uFF09",
+  underlineSaved: "\u5DF2\u52A0\u4E0B\u5212\u7EBF",
+  textBoxSaved: "\u5DF2\u653E\u7F6E\u6587\u672C\u6846",
+  textBoxPlaceholder: "\u5728\u8FD9\u91CC\u5199\u70B9\u4EC0\u4E48\u2026",
+  textBoxEditorLabel: "\u6587\u672C\u6846\u5185\u5BB9"
 };
 var en = {
   title: "Papers",
@@ -1087,6 +1175,7 @@ var en = {
   digestOcrYes: "yes (searchable)",
   digestOcrNo: "no",
   digestNone: "none",
+  digestUnavailable: "unavailable",
   digestInstructions: `Requirements:
 - Read the paper with the read-only tools paper_info, paper_outline, paper_read and paper_search; start from the abstract, conclusion and outline, then read the key sections closely.
 - Answer in the sections below; write "not reported" instead of guessing when the paper gives no evidence:
@@ -1103,7 +1192,15 @@ var en = {
   digestFailed: "Could not write the digest prompt to the composer or the clipboard",
   recentTitle: "Recently opened",
   recentRemove: "Remove from list",
-  recentOpenFailed: "Could not reopen that paper; the entry was kept"
+  recentOpenFailed: "Could not reopen that paper; the entry was kept",
+  underline: "Underline",
+  underlineHint: "Select text to underline (Esc to exit)",
+  textBox: "Text box",
+  textBoxHint: "Click an empty spot on a page to place a text box (Esc to exit)",
+  underlineSaved: "Underlined",
+  textBoxSaved: "Text box placed",
+  textBoxPlaceholder: "Write something here\u2026",
+  textBoxEditorLabel: "Text box content"
 };
 function registerPapersLocale(ctx) {
   const disposeZh = ctx.locale.register(LOCALE_NS, "zh", zh);

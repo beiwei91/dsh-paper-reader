@@ -28,6 +28,28 @@ export const VIEWER_CSS = `
 .pr-hl-rect[data-color="green"]{background:rgba(56,200,120,.35)}
 .pr-hl-rect[data-color="blue"]{background:rgba(80,150,255,.32)}
 .pr-hl-rect[data-color="pink"]{background:rgba(255,120,180,.35)}
+.pr-hl-rect[data-color="orange"]{background:rgba(255,160,40,.35)}
+.pr-hl-rect[data-color="purple"]{background:rgba(168,120,255,.35)}
+.pr-hl-rect[data-color="cyan"]{background:rgba(60,200,220,.35)}
+.pr-hl-rect[data-color="red"]{background:rgba(240,80,80,.32)}
+/* Underline: a 2 px stroke along each box's bottom edge, no fill. The dark accent
+   shades are the same values as the note badges, so one colour reads the same in
+   the page, in the margin dot and in the toolbar swatch. */
+.pr-hl-line{position:absolute;height:2px;border-radius:1px;pointer-events:none;background:#3b7bd8}
+.pr-hl-line[data-color="yellow"]{background:#c9a100}
+.pr-hl-line[data-color="green"]{background:#27995a}
+.pr-hl-line[data-color="blue"]{background:#3b7bd8}
+.pr-hl-line[data-color="pink"]{background:#d4568c}
+.pr-hl-line[data-color="orange"]{background:#d97a12}
+.pr-hl-line[data-color="purple"]{background:#7c53d6}
+.pr-hl-line[data-color="cyan"]{background:#1596a8}
+.pr-hl-line[data-color="red"]{background:#c92b2b}
+/* Text boxes: semi-transparent theme surface, content-sized, never wider than
+   40% of the page. Only the box itself takes pointer events, so selecting page
+   text everywhere else keeps working. */
+.pr-tb-layer{position:absolute;inset:0;pointer-events:none;z-index:4;overflow:hidden}
+.pr-tb{position:absolute;max-width:40%;padding:2px 5px;border-radius:5px;font-size:11px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dsw-alias-bg-secondary,rgba(240,242,245,.92));background:color-mix(in srgb,var(--dsw-alias-bg-secondary,#f0f2f5) 88%,transparent);border:1px solid var(--dsw-alias-border-primary,rgba(0,0,0,.16));color:var(--dsw-alias-label-primary,#1f2328);box-shadow:var(--dsw-shadow-lv1,0 1px 4px rgba(0,0,0,.14));pointer-events:auto;cursor:pointer}
+.pr-tb:hover,.pr-tb:focus-visible{background:color-mix(in srgb,var(--dsw-alias-bg-secondary,#f0f2f5) 96%,transparent);border-color:var(--dsw-alias-border-primary,rgba(0,0,0,.32))}
 /* Note badges ride above the text layer (so they are clickable) but keep the
    layer itself transparent to the pointer: only the dots take events. */
 .pr-badge-layer{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
@@ -37,13 +59,29 @@ export const VIEWER_CSS = `
 .pr-hl-badge[data-color="green"]{background:#27995a}
 .pr-hl-badge[data-color="blue"]{background:#3b7bd8}
 .pr-hl-badge[data-color="pink"]{background:#d4568c}
+.pr-hl-badge[data-color="orange"]{background:#d97a12}
+.pr-hl-badge[data-color="purple"]{background:#7c53d6}
+.pr-hl-badge[data-color="cyan"]{background:#1596a8}
+.pr-hl-badge[data-color="red"]{background:#c92b2b}
 .pr-sel{position:fixed;z-index:60;display:flex;align-items:center;gap:2px;padding:3px 4px;border-radius:8px;background:var(--dsw-alias-bg-elevated,#fff);box-shadow:var(--dsw-shadow-lv2,0 8px 24px rgba(0,0,0,.2));transform:translate(-50%,-100%)}
+/* Eight colours fit the popover as a 4×2 palette instead of one long row. */
+.pr-swatches{display:grid;grid-template-columns:repeat(4,13px);gap:3px;align-items:center}
 .pr-swatch{width:13px;height:13px;border-radius:50%;border:1px solid rgba(0,0,0,.25);cursor:pointer;padding:0}
 .pr-swatch[data-color="yellow"]{background:#ffd400}
 .pr-swatch[data-color="green"]{background:#3cc878}
 .pr-swatch[data-color="blue"]{background:#5b9dff}
 .pr-swatch[data-color="pink"]{background:#ff7ab4}
+.pr-swatch[data-color="orange"]{background:#ff9f2e}
+.pr-swatch[data-color="purple"]{background:#a07aff}
+.pr-swatch[data-color="cyan"]{background:#2fc8dc}
+.pr-swatch[data-color="red"]{background:#f04646}
+.pr-swatch[aria-pressed="true"]{outline:2px solid var(--dsw-alias-label-primary,#1f2328);outline-offset:1px}
+/* The underline tool's colour row: a compact strip under the toolbar. */
+.pr-bar.pr-color-bar{gap:3px;padding:3px 6px}
+.pr-color-bar .pr-swatch{width:12px;height:12px}
+.pr-tool-label{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b949e);padding:0 2px}
 .pr-note{position:fixed;z-index:61;width:232px;padding:6px;border-radius:8px;background:var(--dsw-alias-bg-elevated,#fff);box-shadow:var(--dsw-shadow-lv2,0 8px 24px rgba(0,0,0,.2));display:flex;flex-direction:column;gap:4px}
+.pr-note-label{font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary,#57606a);padding:0 2px 1px}
 .pr-note-input{width:100%;height:64px;resize:vertical;border:1px solid var(--dsw-alias-border-primary,rgba(0,0,0,.16));border-radius:6px;padding:4px 6px;font:inherit;font-size:12px;background:var(--dsw-alias-bg-primary,#fff);color:inherit;outline:none}
 .pr-note-actions{display:flex;gap:4px;justify-content:flex-end}
 .pr-status{padding:20px 12px;font-size:12px;line-height:1.6;text-align:center;color:var(--dsw-alias-label-secondary,#57606a)}

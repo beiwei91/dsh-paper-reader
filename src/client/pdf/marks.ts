@@ -1,13 +1,14 @@
 /**
- * Highlight geometry on a rendered PDF.js text layer.
+ * Quote-anchored mark geometry on a rendered PDF.js text layer.
  *
- * A highlight is anchored by page and quote text; the text layer is rebuilt on
- * every zoom/render, so its marks are recomputed from the text runs instead of
- * stored DOM. Painting is character-exact: the quote is located in the page's
- * raw run text, the raw range is turned into a DOM Range over the layer's text
- * nodes, and the Range's client rects become one overlay box per line. A whole
- * text run (usually a whole line) is therefore only painted when the selection
- * really covers it.
+ * A highlight or underline is anchored by page and quote text; the text layer is
+ * rebuilt on every zoom/render, so its marks are recomputed from the text runs
+ * instead of stored DOM. Painting is character-exact: the quote is located in the
+ * page's raw run text, the raw range is turned into a DOM Range over the layer's
+ * text nodes, and the Range's client rects become one overlay box per line. A
+ * whole text run (usually a whole line) is therefore only painted when the
+ * selection really covers it. Text boxes are not quote-anchored and never reach
+ * this module: they are placed from page fractions by the caller.
  *
  * The quote comes from `window.getSelection()`, which is not always the exact
  * text PDF.js laid out: line breaks, hyphenation, ligatures, soft hyphens and
@@ -15,7 +16,7 @@
  * from the exact folded match to a punctuation/space-insensitive match, and
  * finally to the longest matchable prefix of the quote.
  */
-import type { Highlight } from '../annotations.ts'
+import type { AnnotationKind, Highlight } from '../annotations.ts'
 
 /**
  * Fraction of a box's own height trimmed from its top and bottom edge.
@@ -34,15 +35,21 @@ const MIN_RECT_HEIGHT = 1
 
 /** One page-local overlay box (pixels from the page element's top-left). */
 export interface HighlightBox {
+  /** Painted fill box (vertically trimmed, for highlights). */
   readonly x: number
   readonly y: number
   readonly w: number
   readonly h: number
+  /** Untrimmed top edge: the comfortable click band of an underline starts here. */
+  readonly top: number
+  /** Untrimmed bottom edge: an underline's stroke is drawn here. */
+  readonly bottom: number
 }
 
-/** One highlight's painted geometry on a page. */
+/** One annotation's painted geometry on a page. */
 export interface PaintedHighlight {
   readonly id: string
+  readonly kind: AnnotationKind
   readonly color: string
   readonly rects: readonly HighlightBox[]
 }
@@ -189,33 +196,36 @@ function pointAt(segments: readonly RawSegment[], offset: number): { node: Text;
 }
 
 /**
- * Compute one page's highlight overlay boxes in page-local coordinates.
+ * Compute one page's quote-anchored overlay boxes in page-local coordinates.
  *
- * Only pages whose text layer is built reach this; each highlight costs one
- * Range and one `getClientRects()` call, and a quote that cannot be located is
- * logged and skipped — it still exists in the notes list.
+ * Only pages whose text layer is built reach this; each highlight/underline costs
+ * one Range and one `getClientRects()` call, and a quote that cannot be located is
+ * logged and skipped — it still exists in the notes list. Text boxes are anchored
+ * by page fractions instead and never pass through here.
  *
  * @param container - the built `.pr-text` layer of the page.
  * @param pageElement - the `.pr-page` element, for page-local coordinates.
- * @param pageHighlights - the stored highlights of this page, in paint order.
- * @returns the painted geometry of every located highlight.
+ * @param pageAnnotations - the stored highlight/underline entries of this page, in paint order.
+ * @returns the painted geometry of every located annotation.
  */
 export function layoutHighlights(
   container: HTMLElement,
   pageElement: HTMLElement,
-  pageHighlights: readonly Highlight[],
+  pageAnnotations: readonly Highlight[],
 ): PaintedHighlight[] {
   const painted: PaintedHighlight[] = []
-  if (pageHighlights.length === 0) return painted
+  if (pageAnnotations.length === 0) return painted
   const { raw, segments } = collectRaw(container)
   if (raw === '' || segments.length === 0) return painted
   const pageRect = pageElement.getBoundingClientRect()
   if (pageRect.width <= 0 || pageRect.height <= 0) return painted
 
-  for (const highlight of pageHighlights) {
+  for (const highlight of pageAnnotations) {
+    // A text box carries no quote to locate; it is painted from its fractions.
+    if (highlight.kind === 'text') continue
     const range = locate(raw, highlight.quote)
     if (range === null) {
-      console.warn('[paper-reader] highlight text not found on page', highlight.page, highlight.quote.slice(0, 80))
+      console.warn('[paper-reader] annotation text not found on page', highlight.page, highlight.quote.slice(0, 80))
       continue
     }
     const start = pointAt(segments, range.from)
@@ -226,7 +236,7 @@ export function layoutHighlights(
       domRange.setStart(start.node, start.offset)
       domRange.setEnd(end.node, end.offset)
     } catch (error) {
-      console.warn('[paper-reader] highlight range failed', highlight.page, error)
+      console.warn('[paper-reader] annotation range failed', highlight.page, error)
       continue
     }
     const rects: HighlightBox[] = []
@@ -247,10 +257,12 @@ export function layoutHighlights(
         y: top - pageRect.top + inset,
         w,
         h: Math.max(MIN_RECT_HEIGHT, h - inset * 2),
+        top: top - pageRect.top,
+        bottom: bottom - pageRect.top,
       })
     }
     if (rects.length === 0) continue
-    painted.push({ id: highlight.id, color: highlight.color, rects })
+    painted.push({ id: highlight.id, kind: highlight.kind, color: highlight.color, rects })
   }
   return painted
 }

@@ -86,6 +86,14 @@ const zh: LocaleDictOf<'paperReader'> = {
   recentTitle: '最近打开',
   recentRemove: '从列表移除',
   recentOpenFailed: '无法重新打开这篇论文，记录已保留',
+  underline: '下划线',
+  underlineHint: '选择文字即可加下划线（Esc 退出）',
+  textBox: '文本框',
+  textBoxHint: '点击页面空白处放置文本框（Esc 退出）',
+  underlineSaved: '已加下划线',
+  textBoxSaved: '已放置文本框',
+  textBoxPlaceholder: '在这里写点什么…',
+  textBoxEditorLabel: '文本框内容',
 }
 
 const en: LocaleDictOf<'paperReader'> = {
@@ -170,6 +178,14 @@ const en: LocaleDictOf<'paperReader'> = {
   recentTitle: 'Recently opened',
   recentRemove: 'Remove from list',
   recentOpenFailed: 'Could not reopen that paper; the entry was kept',
+  underline: 'Underline',
+  underlineHint: 'Select text to underline (Esc to exit)',
+  textBox: 'Text box',
+  textBoxHint: 'Click an empty spot on a page to place a text box (Esc to exit)',
+  underlineSaved: 'Underlined',
+  textBoxSaved: 'Text box placed',
+  textBoxPlaceholder: 'Write something here…',
+  textBoxEditorLabel: 'Text box content',
 }
 
 /** Register this plugin's dictionaries; the returned disposer lives in one effect. */
