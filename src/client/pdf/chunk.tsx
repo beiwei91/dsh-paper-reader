@@ -309,6 +309,15 @@ export function PdfViewer({
     }, 2400)
   }, [])
 
+  /** Clear the transient toolbar line early (e.g. when its action is undone). */
+  const dismissToast = useCallback((): void => {
+    if (toastTimer.current !== null) {
+      window.clearTimeout(toastTimer.current)
+      toastTimer.current = null
+    }
+    setToast('')
+  }, [])
+
   /**
    * Recompute one page's highlight overlay from its built text layer.
    *
@@ -323,7 +332,12 @@ export function PdfViewer({
     const textEl = textRefs.current[pageNumber - 1]
     const pageEl = pageRefs.current[pageNumber - 1]
     const layer = hlRefs.current[pageNumber - 1]
-    if (textEl === null || textEl === undefined || pageEl === null || pageEl === undefined || layer === null || layer === undefined) return
+    if (textEl === null || textEl === undefined || pageEl === null || pageEl === undefined || layer === null || layer === undefined) {
+      // The page's DOM is gone (released/unmounted): no boxes can show, and its
+      // cached geometry must not survive to open a dead highlight's note.
+      hitRects.current.delete(pageNumber)
+      return
+    }
     const pageHighlights = highlightsRef.current.filter(highlight => highlight.page === pageNumber)
     layer.replaceChildren()
     if (pageHighlights.length === 0 || textEl.childElementCount === 0) {
@@ -379,14 +393,18 @@ export function PdfViewer({
     hitRects.current.clear()
   }, [scale])
 
-  // Highlights are anchored to text runs, so every (re)built page repaints. The
-  // repaint only measures pages that are already built (never an off-screen
-  // page), and is driven by state changes, never by scrolling.
+  // Highlights are anchored to text runs, so every (re)built page repaints — and
+  // so does every page that just lost its last highlight: skipping pages with no
+  // highlights would leave a deleted mark's rectangle (and its click geometry)
+  // painted until the next zoom or reload. Driven by state only, never by
+  // scrolling; a page without a built text layer is not measured (the painter's
+  // early return covers it, and the built-layer check keeps the loop cheap).
   useEffect(() => {
     if (status !== 'ready') return
     for (let index = 0; index < textRefs.current.length; index += 1) {
       const page = index + 1
-      if (!highlights.some(highlight => highlight.page === page)) continue
+      const built = (textRefs.current[index]?.childElementCount ?? 0) > 0
+      if (!built && !hitRects.current.has(page)) continue
       paintPageHighlights(page)
     }
   }, [highlights, numPages, paintPageHighlights, scale, status, visible])
@@ -1249,7 +1267,7 @@ export function PdfViewer({
         h('button', { type: 'button', className: 'pr-btn', onClick: saveNote }, t('noteSave')),
         h('button', {
           type: 'button', className: 'pr-btn',
-          onClick: () => { onDeleteHighlight(noteEditor.id); setNoteEditor(null) },
+          onClick: () => { onDeleteHighlight(noteEditor.id); setNoteEditor(null); dismissToast() },
         }, t('noteDelete')),
       ),
     ),
