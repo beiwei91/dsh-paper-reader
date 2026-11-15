@@ -57,6 +57,35 @@ const zh: LocaleDictOf<'paperReader'> = {
   retrying: '正在重试',
   ocr: 'OCR',
   ocrHint: '扫描页离线 OCR 进度（文本级，不生成文本层）',
+  noteBadge: '这条高亮有笔记',
+  digest: '摘要',
+  digestIntro: '请为这篇论文生成一份结构化的阅读摘要（digest）。',
+  digestInfoHead: '【论文信息】',
+  digestTitleLabel: '标题：',
+  digestPagesLabel: '总页数：',
+  digestSectionsLabel: '目录章节：',
+  digestOcrLabel: '扫描页 OCR 文本：',
+  digestOcrYes: '有（可搜索）',
+  digestOcrNo: '无',
+  digestNone: '无',
+  digestUnavailable: '暂不可用',
+  digestInstructions: `【要求】
+- 用只读工具 paper_info、paper_outline、paper_read、paper_search 读取这篇论文；先看摘要、结论与目录，再按需精读关键章节。
+- 按下面小节输出；没有依据的写「未提及」，不要编造：
+  1. 问题与动机
+  2. 方法与技术路线
+  3. 主要贡献
+  4. 实验与结果（数据集、指标、关键数字）
+  5. 局限与风险
+  6. 可复现性（代码、数据、超参、算力）
+  7. 阅读顺序建议（先读哪些页或章节）
+- 每条结论尽量标注页码或章节，方便回查。`,
+  digestSent: '摘要提示词已放进输入框，确认后发送',
+  digestCopied: '对话输入框不可用，摘要提示词已复制到剪贴板',
+  digestFailed: '无法写入输入框或剪贴板',
+  recentTitle: '最近打开',
+  recentRemove: '从列表移除',
+  recentOpenFailed: '无法重新打开这篇论文，记录已保留',
 }
 
 const en: LocaleDictOf<'paperReader'> = {
@@ -112,6 +141,35 @@ const en: LocaleDictOf<'paperReader'> = {
   retrying: 'retrying',
   ocr: 'OCR',
   ocrHint: 'Scanned-page OCR progress (offline; text only, no text layer)',
+  noteBadge: 'This highlight has a note',
+  digest: 'Digest',
+  digestIntro: 'Produce a structured reading digest of this paper.',
+  digestInfoHead: 'Paper facts',
+  digestTitleLabel: 'Title: ',
+  digestPagesLabel: 'Pages: ',
+  digestSectionsLabel: 'Outline sections: ',
+  digestOcrLabel: 'Scanned-page OCR text: ',
+  digestOcrYes: 'yes (searchable)',
+  digestOcrNo: 'no',
+  digestNone: 'none',
+  digestUnavailable: 'unavailable',
+  digestInstructions: `Requirements:
+- Read the paper with the read-only tools paper_info, paper_outline, paper_read and paper_search; start from the abstract, conclusion and outline, then read the key sections closely.
+- Answer in the sections below; write "not reported" instead of guessing when the paper gives no evidence:
+  1. Problem and motivation
+  2. Method and technical approach
+  3. Main contributions
+  4. Experiments and results (datasets, metrics, key numbers)
+  5. Limitations and risks
+  6. Reproducibility notes (code, data, hyperparameters, compute)
+  7. Suggested reading order (which pages or sections first)
+- Cite page numbers or section titles wherever possible.`,
+  digestSent: 'Digest prompt placed in the composer — review, then send',
+  digestCopied: 'The composer is unavailable, so the digest prompt was copied to the clipboard',
+  digestFailed: 'Could not write the digest prompt to the composer or the clipboard',
+  recentTitle: 'Recently opened',
+  recentRemove: 'Remove from list',
+  recentOpenFailed: 'Could not reopen that paper; the entry was kept',
 }
 
 /** Register this plugin's dictionaries; the returned disposer lives in one effect. */

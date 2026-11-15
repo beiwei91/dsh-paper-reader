@@ -10,7 +10,11 @@ export const VIEWER_CSS = `
 .pr-btn:hover{background:var(--dsw-alias-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#1f2328)}
 .pr-btn[aria-pressed="true"]{background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.09));color:var(--dsw-alias-label-primary,#1f2328)}
 .pr-spacer{flex:1 1 auto}
-.pr-pages{position:relative;flex:1 1 auto;min-height:0;overflow:auto;padding:12px 0 48px;display:flex;flex-direction:column;align-items:center;gap:12px;scroll-behavior:auto}
+.pr-pages{position:relative;flex:1 1 auto;min-height:0;min-width:0;overflow:auto;padding:12px 0 48px;scroll-behavior:auto}
+/* The page column is as wide as its widest page and at least as wide as the
+   pane: centered while it fits, and a real horizontally scrollable row of pages
+   (left edge reachable) once a zoomed page is wider than the pane. */
+.pr-pages-inner{display:flex;flex-direction:column;align-items:center;gap:12px;min-width:100%;width:max-content;margin:0 auto}
 .pr-page{position:relative;background:#fff;box-shadow:var(--dsw-shadow-lv1,0 1px 4px rgba(0,0,0,.16));border-radius:2px;overflow:hidden;flex:0 0 auto}
 .pr-canvas{display:block}
 .pr-text{position:absolute;inset:0;overflow:clip;line-height:1;letter-spacing:normal;word-spacing:normal;text-align:initial;-webkit-text-size-adjust:none;text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;color-scheme:only light;z-index:2;--min-font-size:1;--text-scale-factor:calc(var(--total-scale-factor) * var(--min-font-size));--min-font-size-inv:calc(1 / var(--min-font-size));--scale-round-x:1px;--scale-round-y:1px}
@@ -24,6 +28,15 @@ export const VIEWER_CSS = `
 .pr-hl-rect[data-color="green"]{background:rgba(56,200,120,.35)}
 .pr-hl-rect[data-color="blue"]{background:rgba(80,150,255,.32)}
 .pr-hl-rect[data-color="pink"]{background:rgba(255,120,180,.35)}
+/* Note badges ride above the text layer (so they are clickable) but keep the
+   layer itself transparent to the pointer: only the dots take events. */
+.pr-badge-layer{position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden}
+.pr-hl-badge{position:absolute;width:9px;height:9px;margin:0;padding:0;appearance:none;-webkit-appearance:none;border:1px solid var(--dsw-alias-bg-primary,#fff);border-radius:50%;background:var(--dsw-alias-label-tertiary,#8b949e);box-shadow:0 0 0 1px var(--dsw-alias-border-secondary,rgba(0,0,0,.12));pointer-events:auto;cursor:pointer;opacity:.75;transition:opacity .12s ease,transform .12s ease}
+.pr-hl-badge:hover,.pr-hl-badge:focus-visible{opacity:1;transform:scale(1.2)}
+.pr-hl-badge[data-color="yellow"]{background:#c9a100}
+.pr-hl-badge[data-color="green"]{background:#27995a}
+.pr-hl-badge[data-color="blue"]{background:#3b7bd8}
+.pr-hl-badge[data-color="pink"]{background:#d4568c}
 .pr-sel{position:fixed;z-index:60;display:flex;align-items:center;gap:2px;padding:3px 4px;border-radius:8px;background:var(--dsw-alias-bg-elevated,#fff);box-shadow:var(--dsw-shadow-lv2,0 8px 24px rgba(0,0,0,.2));transform:translate(-50%,-100%)}
 .pr-swatch{width:13px;height:13px;border-radius:50%;border:1px solid rgba(0,0,0,.25);cursor:pointer;padding:0}
 .pr-swatch[data-color="yellow"]{background:#ffd400}
@@ -69,4 +82,16 @@ export const BODY_CSS = `
 .pr-drop[data-active="true"]{border-color:var(--dsw-focus-ring-color,#3b82f6);background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.04))}
 .pr-head{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:5px 6px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08))}
 .pr-name{flex:1 1 auto;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary,#57606a)}
+/* Recently opened papers: a compact list under the open forms. */
+.pr-recent{width:100%;max-width:420px;max-height:40vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;text-align:left}
+.pr-recent-title{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b949e);padding:2px 6px}
+.pr-recent-row{display:flex;align-items:center;gap:2px;border-radius:6px}
+.pr-recent-row:hover{background:var(--dsw-alias-bg-hover,rgba(0,0,0,.06))}
+.pr-recent-open{flex:1 1 auto;min-width:0;display:flex;align-items:center;border:0;background:transparent;font:inherit;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary,#57606a);text-align:left;padding:3px 6px;border-radius:6px;cursor:pointer;overflow:hidden}
+.pr-recent-row:hover .pr-recent-open{color:var(--dsw-alias-label-primary,#1f2328)}
+.pr-recent-open:disabled{opacity:.5;cursor:default}
+.pr-recent-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pr-recent-x{flex:0 0 auto;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#8b949e);font:inherit;font-size:13px;line-height:1;cursor:pointer;opacity:0;display:flex;align-items:center;justify-content:center}
+.pr-recent-row:hover .pr-recent-x,.pr-recent-x:focus-visible{opacity:1}
+.pr-recent-x:hover{color:var(--dsw-alias-label-primary,#1f2328);background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.09))}
 `

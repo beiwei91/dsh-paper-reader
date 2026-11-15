@@ -50,6 +50,78 @@ interface OpenPaper {
   readonly hostStored?: boolean
   /** The absolute path this paper was opened from, when there is one to re-read. */
   readonly readPath?: string
+  /** Where the bytes came from, for the recent list. */
+  readonly kind: RecentKind
+}
+
+/** The last papers opened in this browser, for one-click reopening from the empty state. */
+const RECENT_KEY = 'dsh.paper-reader.recent'
+const RECENT_LIMIT = 12
+
+/** Where a recent paper's bytes came from (all the ways a paper can be opened). */
+type RecentKind = 'path' | 'drop' | 'arxiv' | 'host'
+
+interface RecentPaper {
+  readonly key: string
+  readonly name: string
+  /** The absolute local path, so a host that lost its bytes can be bypassed. */
+  readonly path?: string
+  readonly kind: RecentKind
+  readonly openedAt: number
+}
+
+/** Infer the source of a paper from its storage key and whether a path is known. */
+function recentKindOf(key: string, path?: string): RecentKind {
+  if (key.startsWith('arxiv:')) return 'arxiv'
+  if (key.startsWith('drop:')) return 'drop'
+  return path === undefined ? 'host' : 'path'
+}
+
+function readRecentPapers(): RecentPaper[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_KEY)
+    if (raw === null) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    const entries: RecentPaper[] = []
+    for (const item of parsed) {
+      const row = item as { key?: unknown; name?: unknown; path?: unknown; kind?: unknown; openedAt?: unknown }
+      if (typeof row.key !== 'string' || row.key === '') continue
+      // A malformed/unknown kind falls back to the safest possible one.
+      const kind: RecentKind =
+        row.kind === 'drop' || row.kind === 'arxiv' || row.kind === 'host' ? row.kind : 'path'
+      entries.push({
+        key: row.key,
+        name: typeof row.name === 'string' && row.name !== '' ? row.name : row.key,
+        path: typeof row.path === 'string' && row.path !== '' ? row.path : undefined,
+        kind,
+        openedAt: typeof row.openedAt === 'number' ? row.openedAt : 0,
+      })
+      if (entries.length >= RECENT_LIMIT) break
+    }
+    return entries
+  } catch {
+    return []
+  }
+}
+
+function writeRecentPapers(entries: readonly RecentPaper[]): void {
+  try {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(entries))
+  } catch {
+    // Storage can be full or disabled; the list is a convenience.
+  }
+}
+
+/** Newest first, deduped by key, capped at `RECENT_LIMIT`. */
+function addRecentPaper(
+  entries: readonly RecentPaper[],
+  entry: Omit<RecentPaper, 'openedAt'>,
+): RecentPaper[] {
+  return [
+    { ...entry, openedAt: Date.now() },
+    ...entries.filter(candidate => candidate.key !== entry.key),
+  ].slice(0, RECENT_LIMIT)
 }
 
 /** The chunk is fetched once per Client module, however many tabs open; a failed fetch may retry. */
@@ -152,6 +224,26 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
   const openSeq = useRef(0)
   const searchSeq = useRef(0)
   const annotations = useAnnotations(paper?.storageKey ?? null)
+  /** Newest-first papers this browser opened; mirrors the localStorage list. */
+  const [recent, setRecent] = useState<RecentPaper[]>(() => readRecentPapers())
+
+  /** Remember one open in the recent list (newest first, deduped, capped). */
+  const recordRecent = useCallback((entry: Omit<RecentPaper, 'openedAt'>): void => {
+    setRecent(previous => {
+      const next = addRecentPaper(previous, entry)
+      writeRecentPapers(next)
+      return next
+    })
+  }, [])
+
+  /** Drop one entry; the rest of the history is untouched. */
+  const forgetRecent = useCallback((key: string): void => {
+    setRecent(previous => {
+      const next = previous.filter(entry => entry.key !== key)
+      writeRecentPapers(next)
+      return next
+    })
+  }, [])
 
   /** Make `next` the open paper and write the durable per-tab pointer immediately. */
   const remember = useCallback((next: OpenPaper): void => {
@@ -162,7 +254,14 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       path: next.readPath,
       sessionId: sessionId === undefined || sessionId === '' ? undefined : sessionId,
     })
-  }, [sessionId, tabId])
+    // Independent of the tab pointer: this list survives "change paper".
+    recordRecent({
+      key: next.storageKey,
+      name: next.name,
+      path: next.readPath,
+      kind: next.kind,
+    })
+  }, [recordRecent, sessionId, tabId])
 
   useEffect(() => {
     alive.current = true
@@ -230,6 +329,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
           bytes,
           hostStored,
           readPath: stored.path,
+          kind: recentKindOf(stored.key, stored.path),
         })
         // The agent's paper_* tools answer about the session's current paper;
         // restoring the viewer must not leave them without one.
@@ -275,7 +375,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       const bytes = result.value.data as Uint8Array<ArrayBuffer>
       if (!alive.current) return
       const absolutePath = result.value.absolutePath || path
-      remember({ name: baseName(path), storageKey: absolutePath, bytes, readPath: absolutePath })
+      remember({ name: baseName(path), storageKey: absolutePath, bytes, readPath: absolutePath, kind: 'path' })
     } catch (reason) {
       if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -310,7 +410,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       const bytes = new Uint8Array(await bytesResponse.arrayBuffer())
       // A slower, earlier open must never replace the paper the user just asked for.
       if (!alive.current || sequence !== openSeq.current) return
-      remember({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true })
+      remember({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true, kind: 'arxiv' })
     } catch (reason) {
       if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -354,11 +454,68 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       const bytes = new Uint8Array(await file.arrayBuffer())
       if (!alive.current) return
       // A dropped file has no path to re-read; its bytes live in the Host from here on.
-      remember({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes })
+      remember({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes, kind: 'drop' })
     } catch (reason) {
       if (alive.current) setError(reason instanceof Error ? reason.message : String(reason))
     }
   }, [remember, t])
+
+  /**
+   * Reopen one recently opened paper.
+   *
+   * The Host keeps every paper whose bytes it was given, so that copy is the
+   * primary path; a 404 is the one case where the entry's stored local path can
+   * re-read the file itself. A failure stays visible and keeps the entry: a
+   * transient Host restart must never silently erase the user's history.
+   */
+  const openRecent = useCallback(async (entry: RecentPaper): Promise<void> => {
+    const sequence = openSeq.current + 1
+    openSeq.current = sequence
+    setBusy(true)
+    setError(null)
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    try {
+      let bytes: Uint8Array<ArrayBuffer>
+      let hostStored = true
+      let readPath = entry.path
+      const response = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(entry.key)}`, {
+        signal: controller.signal,
+      })
+      if (response.ok) {
+        bytes = new Uint8Array(await response.arrayBuffer())
+      } else if (response.status === 404 && entry.path !== undefined && sessionId !== undefined && sessionId !== '') {
+        // The Host lost its copy (restart, or an upload that never finished):
+        // re-read the original file through the injected workspace reader.
+        const result = await reader.readBytes(sessionId as never, entry.path, {}, controller.signal)
+        if (!result.ok) throw new Error(errorLine((result.error as { code?: string }).code, t))
+        bytes = result.value.data as Uint8Array<ArrayBuffer>
+        hostStored = false
+        readPath = result.value.absolutePath || entry.path
+      } else {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      if (!alive.current || sequence !== openSeq.current) return
+      remember({ name: entry.name, storageKey: entry.key, bytes, hostStored, readPath, kind: entry.kind })
+      // The agent's paper_* tools answer about the session's current paper; a
+      // host-stored reopen skips the upload that would otherwise point them here.
+      if (hostStored && sessionId !== undefined && sessionId !== '') {
+        void fetch('/paper-reader/api/current', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId, key: entry.key, title: entry.name }),
+        }).catch(() => undefined)
+      }
+    } catch (reason) {
+      if (!alive.current || sequence !== openSeq.current) return
+      console.warn('[paper-reader] recent paper reopen failed', reason)
+      // Keep the entry: the failure may be temporary, and losing history is worse.
+      setError(`${t('recentOpenFailed')} · ${entry.name}`)
+    } finally {
+      if (alive.current && sequence === openSeq.current) setBusy(false)
+    }
+  }, [reader, remember, sessionId, t])
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault()
@@ -468,6 +625,18 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
     inputActions.submit()
   }, [cite, inputActions, t])
 
+  /**
+   * Put the viewer's paper-digest prompt into the composer in ONE mutation,
+   * without sending: the user reviews it first. `false` tells the viewer the
+   * composer is unavailable so it can fall back to the clipboard and say so.
+   */
+  const deliverDigest = useCallback((prompt: string): boolean => {
+    const actions = inputActions
+    if (actions === undefined || typeof actions.setDraft !== 'function') return false
+    actions.setDraft(prompt)
+    return true
+  }, [inputActions])
+
   // Visible, non-blocking lines for writes the Host rejected: a hidden console
   // warning was exactly how the annotation bug stayed invisible.
   const warnings: string[] = []
@@ -489,6 +658,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
         : h(viewer, {
           bytes: paper.bytes,
           storageKey: paper.storageKey,
+          name: paper.name,
           t,
           highlights: annotations.highlights,
           // The tab type keeps this body mounted while another right-sidebar tab
@@ -499,6 +669,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
           onDeleteHighlight: annotations.removeHighlight,
           onQuote: quote,
           onAsk: ask,
+          onDigest: deliverDigest,
         }),
     )
   }
@@ -577,6 +748,27 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
         },
           h('span', { className: 'pr-result-title' }, hit.title),
           h('span', { className: 'pr-result-meta' }, `arXiv:${hit.id}${hit.published === '' ? '' : ` · ${hit.published}`}`),
+        )),
+      ),
+      // Newest first, and only when there is history: an empty state with a
+      // "recently opened" heading over nothing would just add noise.
+      recent.length > 0 && h('div', { className: 'pr-recent' },
+        h('div', { className: 'pr-recent-title' }, t('recentTitle')),
+        ...recent.map(entry => h('div', { key: entry.key, className: 'pr-recent-row' },
+          h('button', {
+            type: 'button',
+            className: 'pr-recent-open',
+            title: entry.path ?? entry.key,
+            disabled: busy,
+            onClick: () => void openRecent(entry),
+          }, h('span', { className: 'pr-recent-name' }, entry.name)),
+          h('button', {
+            type: 'button',
+            className: 'pr-recent-x',
+            title: t('recentRemove'),
+            'aria-label': t('recentRemove'),
+            onClick: () => forgetRecent(entry.key),
+          }, '×'),
         )),
       ),
       error !== null && h('div', { className: 'pr-error' }, error),

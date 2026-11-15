@@ -16,6 +16,8 @@ export interface PdfViewerProps {
   bytes: Uint8Array<ArrayBuffer>
   /** Stable key for the remembered reading position and the annotation file. */
   storageKey: string
+  /** The paper's display name, used in the digest prompt header. */
+  name?: string
   /** The plugin's copy function, so the chunk needs no locale service of its own. */
   t: (key: PaperReaderLocaleKey) => string
   /** Every stored highlight of this paper; the viewer paints the ones on screen. */
@@ -33,6 +35,12 @@ export interface PdfViewerProps {
   onQuote(text: string, page: number): void
   /** Quote a selection and ask the agent about it. */
   onAsk(text: string, page: number, kind: 'explain' | 'translate'): void
+  /**
+   * Put a paper-digest prompt into the conversation composer as one draft
+   * mutation, without sending it. Returns whether the composer took it; `false`
+   * asks the viewer to fall back to the clipboard.
+   */
+  onDigest?: (prompt: string) => boolean
 }
 
 /** Props the tab body receives: the injected face, the copy, and the standard Session props. */

@@ -296,6 +296,18 @@ var BODY_CSS = `
 .pr-drop[data-active="true"]{border-color:var(--dsw-focus-ring-color,#3b82f6);background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.04))}
 .pr-head{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:5px 6px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(0,0,0,.08))}
 .pr-name{flex:1 1 auto;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary,#57606a)}
+/* Recently opened papers: a compact list under the open forms. */
+.pr-recent{width:100%;max-width:420px;display:flex;flex-direction:column;gap:1px;text-align:left}
+.pr-recent-title{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b949e);padding:2px 6px}
+.pr-recent-row{display:flex;align-items:center;gap:2px;border-radius:6px}
+.pr-recent-row:hover{background:var(--dsw-alias-bg-hover,rgba(0,0,0,.06))}
+.pr-recent-open{flex:1 1 auto;min-width:0;display:flex;align-items:center;border:0;background:transparent;font:inherit;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary,#57606a);text-align:left;padding:3px 6px;border-radius:6px;cursor:pointer;overflow:hidden}
+.pr-recent-row:hover .pr-recent-open{color:var(--dsw-alias-label-primary,#1f2328)}
+.pr-recent-open:disabled{opacity:.5;cursor:default}
+.pr-recent-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pr-recent-x{flex:0 0 auto;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#8b949e);font:inherit;font-size:13px;line-height:1;cursor:pointer;opacity:0}
+.pr-recent-row:hover .pr-recent-x,.pr-recent-x:focus-visible{opacity:1}
+.pr-recent-x:hover{color:var(--dsw-alias-label-primary,#1f2328);background:var(--dsw-alias-bg-secondary,rgba(0,0,0,.09))}
 `;
 
 // src/client/PapersBody.tsx
@@ -313,6 +325,50 @@ function problemLine(label, problem, t) {
 function baseName(path) {
   const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] || path;
+}
+var RECENT_KEY = "dsh.paper-reader.recent";
+var RECENT_LIMIT = 12;
+function recentKindOf(key, path) {
+  if (key.startsWith("arxiv:")) return "arxiv";
+  if (key.startsWith("drop:")) return "drop";
+  return path === void 0 ? "host" : "path";
+}
+function readRecentPapers() {
+  try {
+    const raw = window.localStorage.getItem(RECENT_KEY);
+    if (raw === null) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const entries = [];
+    for (const item of parsed) {
+      const row = item;
+      if (typeof row.key !== "string" || row.key === "") continue;
+      const kind = row.kind === "drop" || row.kind === "arxiv" || row.kind === "host" ? row.kind : "path";
+      entries.push({
+        key: row.key,
+        name: typeof row.name === "string" && row.name !== "" ? row.name : row.key,
+        path: typeof row.path === "string" && row.path !== "" ? row.path : void 0,
+        kind,
+        openedAt: typeof row.openedAt === "number" ? row.openedAt : 0
+      });
+      if (entries.length >= RECENT_LIMIT) break;
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+function writeRecentPapers(entries) {
+  try {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(entries));
+  } catch {
+  }
+}
+function addRecentPaper(entries, entry) {
+  return [
+    { ...entry, openedAt: Date.now() },
+    ...entries.filter((candidate) => candidate.key !== entry.key)
+  ].slice(0, RECENT_LIMIT);
 }
 var chunkPromise = null;
 function loadViewer() {
@@ -380,6 +436,21 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
   const openSeq = (0, import_react2.useRef)(0);
   const searchSeq = (0, import_react2.useRef)(0);
   const annotations = useAnnotations(paper?.storageKey ?? null);
+  const [recent, setRecent] = (0, import_react2.useState)(() => readRecentPapers());
+  const recordRecent = (0, import_react2.useCallback)((entry) => {
+    setRecent((previous) => {
+      const next = addRecentPaper(previous, entry);
+      writeRecentPapers(next);
+      return next;
+    });
+  }, []);
+  const forgetRecent = (0, import_react2.useCallback)((key) => {
+    setRecent((previous) => {
+      const next = previous.filter((entry) => entry.key !== key);
+      writeRecentPapers(next);
+      return next;
+    });
+  }, []);
   const remember = (0, import_react2.useCallback)((next) => {
     setPaper(next);
     writeTabPaper(tabId, {
@@ -388,7 +459,13 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
       path: next.readPath,
       sessionId: sessionId === void 0 || sessionId === "" ? void 0 : sessionId
     });
-  }, [sessionId, tabId]);
+    recordRecent({
+      key: next.storageKey,
+      name: next.name,
+      path: next.readPath,
+      kind: next.kind
+    });
+  }, [recordRecent, sessionId, tabId]);
   (0, import_react2.useEffect)(() => {
     alive.current = true;
     return () => {
@@ -446,7 +523,8 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
           storageKey: stored.key,
           bytes,
           hostStored,
-          readPath: stored.path
+          readPath: stored.path,
+          kind: recentKindOf(stored.key, stored.path)
         });
         void fetch("/paper-reader/api/current", {
           method: "POST",
@@ -487,7 +565,7 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
       const bytes = result.value.data;
       if (!alive.current) return;
       const absolutePath = result.value.absolutePath || path;
-      remember({ name: baseName(path), storageKey: absolutePath, bytes, readPath: absolutePath });
+      remember({ name: baseName(path), storageKey: absolutePath, bytes, readPath: absolutePath, kind: "path" });
     } catch (reason) {
       if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -520,7 +598,7 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
       if (!bytesResponse.ok) throw new Error(t("arxivOpenFailed"));
       const bytes = new Uint8Array(await bytesResponse.arrayBuffer());
       if (!alive.current || sequence !== openSeq.current) return;
-      remember({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true });
+      remember({ name: opened.title || knownTitle || opened.id || input, storageKey: opened.key, bytes, hostStored: true, kind: "arxiv" });
     } catch (reason) {
       if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -561,11 +639,47 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (!alive.current) return;
-      remember({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes });
+      remember({ name: file.name, storageKey: `drop:${file.name}:${file.size}:${file.lastModified}`, bytes, kind: "drop" });
     } catch (reason) {
       if (alive.current) setError(reason instanceof Error ? reason.message : String(reason));
     }
   }, [remember, t]);
+  const openRecent = (0, import_react2.useCallback)(async (entry) => {
+    const sequence = openSeq.current + 1;
+    openSeq.current = sequence;
+    setBusy(true);
+    setError(null);
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      let bytes;
+      let hostStored = true;
+      let readPath = entry.path;
+      const response = await fetch(`/paper-reader/api/paper/bytes?key=${encodeURIComponent(entry.key)}`, {
+        signal: controller.signal
+      });
+      if (response.ok) {
+        bytes = new Uint8Array(await response.arrayBuffer());
+      } else if (response.status === 404 && entry.path !== void 0 && sessionId !== void 0 && sessionId !== "") {
+        const result = await reader.readBytes(sessionId, entry.path, {}, controller.signal);
+        if (!result.ok) throw new Error(errorLine(result.error.code, t));
+        bytes = result.value.data;
+        hostStored = false;
+        readPath = result.value.absolutePath || entry.path;
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      if (!alive.current || sequence !== openSeq.current) return;
+      remember({ name: entry.name, storageKey: entry.key, bytes, hostStored, readPath, kind: entry.kind });
+    } catch (reason) {
+      if (!alive.current || sequence !== openSeq.current) return;
+      console.warn("[paper-reader] recent paper reopen failed", reason);
+      setError(`${t("recentOpenFailed")} \xB7 ${entry.name}`);
+    } finally {
+      if (alive.current && sequence === openSeq.current) setBusy(false);
+    }
+  }, [reader, remember, sessionId, t]);
   const onDragOver = (0, import_react2.useCallback)((event) => {
     event.preventDefault();
     setDropping(true);
@@ -653,6 +767,12 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
 ${instruction}`);
     inputActions.submit();
   }, [cite, inputActions, t]);
+  const deliverDigest = (0, import_react2.useCallback)((prompt) => {
+    const actions = inputActions;
+    if (actions === void 0 || typeof actions.setDraft !== "function") return false;
+    actions.setDraft(prompt);
+    return true;
+  }, [inputActions]);
   const warnings = [];
   if (uploadProblem !== null) warnings.push(problemLine(t("paperUploadFailed"), uploadProblem, t));
   if (annotations.loadProblem !== null) warnings.push(problemLine(t("annotationLoadFailed"), annotations.loadProblem, t));
@@ -673,6 +793,7 @@ ${instruction}`);
       viewer === null ? (0, import_react2.createElement)("div", { className: "pr-status" }, t("loading")) : (0, import_react2.createElement)(viewer, {
         bytes: paper.bytes,
         storageKey: paper.storageKey,
+        name: paper.name,
         t,
         highlights: annotations.highlights,
         // The tab type keeps this body mounted while another right-sidebar tab
@@ -682,7 +803,8 @@ ${instruction}`);
         onUpdateNote: annotations.updateNote,
         onDeleteHighlight: annotations.removeHighlight,
         onQuote: quote,
-        onAsk: ask
+        onAsk: ask,
+        onDigest: deliverDigest
       })
     );
   }
@@ -786,6 +908,31 @@ ${instruction}`);
           (0, import_react2.createElement)("span", { className: "pr-result-meta" }, `arXiv:${hit.id}${hit.published === "" ? "" : ` \xB7 ${hit.published}`}`)
         ))
       ),
+      // Newest first, and only when there is history: an empty state with a
+      // "recently opened" heading over nothing would just add noise.
+      recent.length > 0 && (0, import_react2.createElement)(
+        "div",
+        { className: "pr-recent" },
+        (0, import_react2.createElement)("div", { className: "pr-recent-title" }, t("recentTitle")),
+        ...recent.map((entry) => (0, import_react2.createElement)(
+          "div",
+          { key: entry.key, className: "pr-recent-row" },
+          (0, import_react2.createElement)("button", {
+            type: "button",
+            className: "pr-recent-open",
+            title: entry.path ?? entry.key,
+            disabled: busy,
+            onClick: () => void openRecent(entry)
+          }, (0, import_react2.createElement)("span", { className: "pr-recent-name" }, entry.name)),
+          (0, import_react2.createElement)("button", {
+            type: "button",
+            className: "pr-recent-x",
+            title: t("recentRemove"),
+            "aria-label": t("recentRemove"),
+            onClick: () => forgetRecent(entry.key)
+          }, "\xD7")
+        ))
+      ),
       error !== null && (0, import_react2.createElement)("div", { className: "pr-error" }, error),
       ...warnings.map((line) => (0, import_react2.createElement)("div", { className: "pr-warn", key: line }, line))
     )
@@ -846,7 +993,35 @@ var zh = {
   annotationSaveFailed: "\u9AD8\u4EAE\u548C\u7B14\u8BB0\u4FDD\u5B58\u5931\u8D25",
   retrying: "\u6B63\u5728\u91CD\u8BD5",
   ocr: "OCR",
-  ocrHint: "\u626B\u63CF\u9875\u79BB\u7EBF OCR \u8FDB\u5EA6\uFF08\u6587\u672C\u7EA7\uFF0C\u4E0D\u751F\u6210\u6587\u672C\u5C42\uFF09"
+  ocrHint: "\u626B\u63CF\u9875\u79BB\u7EBF OCR \u8FDB\u5EA6\uFF08\u6587\u672C\u7EA7\uFF0C\u4E0D\u751F\u6210\u6587\u672C\u5C42\uFF09",
+  noteBadge: "\u8FD9\u6761\u9AD8\u4EAE\u6709\u7B14\u8BB0",
+  digest: "\u6458\u8981",
+  digestIntro: "\u8BF7\u4E3A\u8FD9\u7BC7\u8BBA\u6587\u751F\u6210\u4E00\u4EFD\u7ED3\u6784\u5316\u7684\u9605\u8BFB\u6458\u8981\uFF08digest\uFF09\u3002",
+  digestInfoHead: "\u3010\u8BBA\u6587\u4FE1\u606F\u3011",
+  digestTitleLabel: "\u6807\u9898\uFF1A",
+  digestPagesLabel: "\u603B\u9875\u6570\uFF1A",
+  digestSectionsLabel: "\u76EE\u5F55\u7AE0\u8282\uFF1A",
+  digestOcrLabel: "\u626B\u63CF\u9875 OCR \u6587\u672C\uFF1A",
+  digestOcrYes: "\u6709\uFF08\u53EF\u641C\u7D22\uFF09",
+  digestOcrNo: "\u65E0",
+  digestNone: "\u65E0",
+  digestInstructions: `\u3010\u8981\u6C42\u3011
+- \u7528\u53EA\u8BFB\u5DE5\u5177 paper_info\u3001paper_outline\u3001paper_read\u3001paper_search \u8BFB\u53D6\u8FD9\u7BC7\u8BBA\u6587\uFF1B\u5148\u770B\u6458\u8981\u3001\u7ED3\u8BBA\u4E0E\u76EE\u5F55\uFF0C\u518D\u6309\u9700\u7CBE\u8BFB\u5173\u952E\u7AE0\u8282\u3002
+- \u6309\u4E0B\u9762\u5C0F\u8282\u8F93\u51FA\uFF1B\u6CA1\u6709\u4F9D\u636E\u7684\u5199\u300C\u672A\u63D0\u53CA\u300D\uFF0C\u4E0D\u8981\u7F16\u9020\uFF1A
+  1. \u95EE\u9898\u4E0E\u52A8\u673A
+  2. \u65B9\u6CD5\u4E0E\u6280\u672F\u8DEF\u7EBF
+  3. \u4E3B\u8981\u8D21\u732E
+  4. \u5B9E\u9A8C\u4E0E\u7ED3\u679C\uFF08\u6570\u636E\u96C6\u3001\u6307\u6807\u3001\u5173\u952E\u6570\u5B57\uFF09
+  5. \u5C40\u9650\u4E0E\u98CE\u9669
+  6. \u53EF\u590D\u73B0\u6027\uFF08\u4EE3\u7801\u3001\u6570\u636E\u3001\u8D85\u53C2\u3001\u7B97\u529B\uFF09
+  7. \u9605\u8BFB\u987A\u5E8F\u5EFA\u8BAE\uFF08\u5148\u8BFB\u54EA\u4E9B\u9875\u6216\u7AE0\u8282\uFF09
+- \u6BCF\u6761\u7ED3\u8BBA\u5C3D\u91CF\u6807\u6CE8\u9875\u7801\u6216\u7AE0\u8282\uFF0C\u65B9\u4FBF\u56DE\u67E5\u3002`,
+  digestSent: "\u6458\u8981\u63D0\u793A\u8BCD\u5DF2\u653E\u8FDB\u8F93\u5165\u6846\uFF0C\u786E\u8BA4\u540E\u53D1\u9001",
+  digestCopied: "\u5BF9\u8BDD\u8F93\u5165\u6846\u4E0D\u53EF\u7528\uFF0C\u6458\u8981\u63D0\u793A\u8BCD\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F",
+  digestFailed: "\u65E0\u6CD5\u5199\u5165\u8F93\u5165\u6846\u6216\u526A\u8D34\u677F",
+  recentTitle: "\u6700\u8FD1\u6253\u5F00",
+  recentRemove: "\u4ECE\u5217\u8868\u79FB\u9664",
+  recentOpenFailed: "\u65E0\u6CD5\u91CD\u65B0\u6253\u5F00\u8FD9\u7BC7\u8BBA\u6587\uFF0C\u8BB0\u5F55\u5DF2\u4FDD\u7559"
 };
 var en = {
   title: "Papers",
@@ -900,7 +1075,35 @@ var en = {
   annotationSaveFailed: "Could not save highlights and notes",
   retrying: "retrying",
   ocr: "OCR",
-  ocrHint: "Scanned-page OCR progress (offline; text only, no text layer)"
+  ocrHint: "Scanned-page OCR progress (offline; text only, no text layer)",
+  noteBadge: "This highlight has a note",
+  digest: "Digest",
+  digestIntro: "Produce a structured reading digest of this paper.",
+  digestInfoHead: "Paper facts",
+  digestTitleLabel: "Title: ",
+  digestPagesLabel: "Pages: ",
+  digestSectionsLabel: "Outline sections: ",
+  digestOcrLabel: "Scanned-page OCR text: ",
+  digestOcrYes: "yes (searchable)",
+  digestOcrNo: "no",
+  digestNone: "none",
+  digestInstructions: `Requirements:
+- Read the paper with the read-only tools paper_info, paper_outline, paper_read and paper_search; start from the abstract, conclusion and outline, then read the key sections closely.
+- Answer in the sections below; write "not reported" instead of guessing when the paper gives no evidence:
+  1. Problem and motivation
+  2. Method and technical approach
+  3. Main contributions
+  4. Experiments and results (datasets, metrics, key numbers)
+  5. Limitations and risks
+  6. Reproducibility notes (code, data, hyperparameters, compute)
+  7. Suggested reading order (which pages or sections first)
+- Cite page numbers or section titles wherever possible.`,
+  digestSent: "Digest prompt placed in the composer \u2014 review, then send",
+  digestCopied: "The composer is unavailable, so the digest prompt was copied to the clipboard",
+  digestFailed: "Could not write the digest prompt to the composer or the clipboard",
+  recentTitle: "Recently opened",
+  recentRemove: "Remove from list",
+  recentOpenFailed: "Could not reopen that paper; the entry was kept"
 };
 function registerPapersLocale(ctx) {
   const disposeZh = ctx.locale.register(LOCALE_NS, "zh", zh);

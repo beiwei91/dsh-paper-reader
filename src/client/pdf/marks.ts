@@ -17,6 +17,21 @@
  */
 import type { Highlight } from '../annotations.ts'
 
+/**
+ * Fraction of a box's own height trimmed from its top and bottom edge.
+ *
+ * `getClientRects()` returns one box per line, and boxes of adjacent lines (or
+ * of a font whose glyph box is taller than its line) can touch or overlap, which
+ * reads as one continuous smear instead of separate lines. Trimming both ends of
+ * every box keeps neighbouring highlight lines visibly apart. The trim is
+ * relative to each rect, so mixed font sizes and zoom levels need no extra
+ * calibration; hit-testing uses the drawn boxes, so clicking stays exact.
+ */
+const RECT_VERTICAL_INSET = 0.08
+
+/** A box never trims below this height, so a tiny rect stays visible and clickable. */
+const MIN_RECT_HEIGHT = 1
+
 /** One page-local overlay box (pixels from the page element's top-left). */
 export interface HighlightBox {
   readonly x: number
@@ -224,7 +239,15 @@ export function layoutHighlights(
       const w = right - left
       const h = bottom - top
       if (w < 1 || h < 1) continue
-      rects.push({ x: left - pageRect.left, y: top - pageRect.top, w, h })
+      // Shrink vertically only: the boxes of adjacent lines no longer touch, while
+      // the horizontal extent (what the highlight actually covers) stays exact.
+      const inset = Math.min(h * RECT_VERTICAL_INSET, Math.max(0, (h - MIN_RECT_HEIGHT) / 2))
+      rects.push({
+        x: left - pageRect.left,
+        y: top - pageRect.top + inset,
+        w,
+        h: Math.max(MIN_RECT_HEIGHT, h - inset * 2),
+      })
     }
     if (rects.length === 0) continue
     painted.push({ id: highlight.id, color: highlight.color, rects })

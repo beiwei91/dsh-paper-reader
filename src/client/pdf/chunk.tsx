@@ -5,7 +5,7 @@
  * under the same artifact revision.
  */
 import * as pdfjs from 'pdfjs-dist'
-import { createElement as h, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createElement as h, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import workerSource from '../../../.build/pdf-worker.txt'
 import type { Highlight, HighlightColor } from '../annotations.ts'
 import type { PdfViewerProps } from '../contract.ts'
@@ -92,6 +92,30 @@ const MAX_CANVAS_AREA = 16777216
 const MAX_HITS = 60
 const POSITION_PREFIX = 'dsh.paper-reader.pos.'
 const COLORS: readonly HighlightColor[] = ['yellow', 'green', 'blue', 'pink']
+/**
+ * Ctrl/Cmd+wheel zoom rate: one wheel delta unit scales by `exp(-delta * rate)`.
+ * Fine enough for a trackpad pinch and still a sensible notch on a real wheel.
+ */
+const WHEEL_ZOOM_RATE = 0.0015
+/** How far above a jumped-to highlight's first box the reader lands. */
+const HIGHLIGHT_REVEAL_OFFSET = 40
+/** Bounded wait for a highlight's geometry before falling back to its page top. */
+const HIGHLIGHT_REVEAL_TIMEOUT_MS = 1200
+/** Note-badge geometry in the right page margin (px). */
+const BADGE_SIZE = 9
+const BADGE_GAP = 3
+/** Outline titles quoted in a digest prompt, so the prompt stays a reasonable size. */
+const DIGEST_SECTION_LIMIT = 30
+
+interface ZoomAnchor {
+  /** The scale this anchor belongs to; applied the layout after it commits. */
+  readonly scale: number
+  readonly page: number
+  /** The cursor's vertical position inside that page, as a 0–1 fraction. */
+  readonly ratio: number
+  /** The cursor's vertical offset from the scroller's top edge. */
+  readonly viewportY: number
+}
 
 let workerBlobUrl: string | null = null
 
@@ -226,6 +250,7 @@ function caretRangeAt(x: number, y: number): Range | null {
 export function PdfViewer({
   bytes,
   storageKey,
+  name,
   t,
   highlights,
   visible = true,
@@ -234,6 +259,7 @@ export function PdfViewer({
   onDeleteHighlight,
   onQuote,
   onAsk,
+  onDigest,
 }: PdfViewerProps): ReturnType<typeof h> {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -242,6 +268,8 @@ export function PdfViewer({
   const textRefs = useRef<(HTMLDivElement | null)[]>([])
   /** Per-page overlay holding the painted highlight rectangles. */
   const hlRefs = useRef<(HTMLDivElement | null)[]>([])
+  /** Per-page overlay holding one note badge per annotated highlight. */
+  const badgeRefs = useRef<(HTMLDivElement | null)[]>([])
   /** Painted highlight geometry per page, in page-local coordinates, for click hit-testing. */
   const hitRects = useRef<Map<number, readonly PaintedHighlight[]>>(new Map())
   const docRef = useRef<PdfDoc | null>(null)
@@ -272,6 +300,14 @@ export function PdfViewer({
   const actionGuard = useRef(false)
   /** Background OCR of scanned pages: one scheduler per open document. */
   const ocrScheduler = useRef<OcrScheduler | null>(null)
+  /** Where the cursor was when a ctrl+wheel zoom started, applied once the new sizes commit. */
+  const zoomAnchor = useRef<ZoomAnchor | null>(null)
+  /** The scale the latest wheel events asked for, so one frame's events compound correctly. */
+  const pendingScale = useRef<number | null>(null)
+  /** The newest ctrl+wheel handler, so the non-passive listener can stay registered once. */
+  const wheelZoomRef = useRef<(event: WheelEvent) => void>(() => undefined)
+  /** The latest copy function, so the painted badges stay localisable without repainting on every render. */
+  const tRef = useRef(t)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   /** Whether the document should be loaded: false while this tab is hidden. */
@@ -294,10 +330,16 @@ export function PdfViewer({
   const [toast, setToast] = useState('')
   const toastTimer = useRef<number | null>(null)
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
+  /** Pages the Host's OCR cache already had when this document opened (for the digest prompt). */
+  const [cachedOcrPages, setCachedOcrPages] = useState(0)
 
   useEffect(() => { currentPageRef.current = currentPage }, [currentPage])
-  useEffect(() => { scaleRef.current = scale }, [scale])
+  useEffect(() => {
+    scaleRef.current = scale
+    pendingScale.current = null
+  }, [scale])
   useEffect(() => { highlightsRef.current = highlights }, [highlights])
+  useEffect(() => { tRef.current = t }, [t])
 
   /** Show one transient line in the toolbar; the next message replaces it. */
   const announce = useCallback((message: string): void => {
@@ -318,6 +360,21 @@ export function PdfViewer({
     setToast('')
   }, [])
 
+  /** Open one highlight's note editor at a viewport point (shared by boxes and margin badges). */
+  const openNoteEditor = useCallback((id: string, clientX: number, clientY: number): void => {
+    const highlight = highlightsRef.current.find(candidate => candidate.id === id)
+    if (highlight === undefined) return
+    const pane = scrollRef.current?.getBoundingClientRect()
+    const left = pane?.left ?? 0
+    const width = pane?.width ?? 360
+    setNoteEditor({
+      id: highlight.id,
+      note: highlight.note,
+      x: Math.max(8, Math.min(clientX, left + width - 240)),
+      y: Math.max(8, clientY - 20),
+    })
+  }, [])
+
   /**
    * Recompute one page's highlight overlay from its built text layer.
    *
@@ -327,19 +384,27 @@ export function PdfViewer({
    * text run. The geometry is kept per page for click hit-testing, because the
    * overlay boxes themselves are `pointer-events: none`. Pages without a built
    * layer are never measured here.
+   *
+   * Annotated cards also get a note badge in the right page margin, at the last
+   * painted line's vertical centre: it must sit outside the glyphs, so it starts
+   * just past the box and is clamped inside the page's right edge. Badges are
+   * repainted (and removed) together with their rectangles.
    */
   const paintPageHighlights = useCallback((pageNumber: number): void => {
     const textEl = textRefs.current[pageNumber - 1]
     const pageEl = pageRefs.current[pageNumber - 1]
     const layer = hlRefs.current[pageNumber - 1]
+    const badgeLayer = badgeRefs.current[pageNumber - 1]
     if (textEl === null || textEl === undefined || pageEl === null || pageEl === undefined || layer === null || layer === undefined) {
       // The page's DOM is gone (released/unmounted): no boxes can show, and its
       // cached geometry must not survive to open a dead highlight's note.
       hitRects.current.delete(pageNumber)
+      if (badgeLayer !== null && badgeLayer !== undefined) badgeLayer.replaceChildren()
       return
     }
     const pageHighlights = highlightsRef.current.filter(highlight => highlight.page === pageNumber)
     layer.replaceChildren()
+    if (badgeLayer !== null && badgeLayer !== undefined) badgeLayer.replaceChildren()
     if (pageHighlights.length === 0 || textEl.childElementCount === 0) {
       hitRects.current.set(pageNumber, [])
       return
@@ -357,8 +422,42 @@ export function PdfViewer({
         layer.append(rect)
       }
     }
+    if (badgeLayer !== null && badgeLayer !== undefined && painted.length > 0) {
+      const pageWidth = pageEl.clientWidth || pageEl.offsetWidth
+      const notes = new Map<string, string>()
+      for (const highlight of pageHighlights) notes.set(highlight.id, highlight.note)
+      for (const highlight of painted) {
+        const note = (notes.get(highlight.id) ?? '').trim()
+        const last = highlight.rects[highlight.rects.length - 1]
+        if (note === '' || last === undefined) continue
+        const badge = document.createElement('button')
+        badge.type = 'button'
+        badge.className = 'pr-hl-badge'
+        badge.setAttribute('data-color', highlight.color)
+        badge.setAttribute('aria-label', tRef.current('noteBadge'))
+        badge.title = note.length > 120 ? `${note.slice(0, 120)}…` : note
+        // Right page margin, never over the glyphs: `BADGE_GAP` past the last box,
+        // and at worst flush against the page's inner right edge.
+        const left = Math.min(last.x + last.w + BADGE_GAP, Math.max(0, pageWidth - BADGE_SIZE - 1))
+        const top = Math.max(0, last.y + last.h / 2 - BADGE_SIZE / 2)
+        badge.style.left = `${left}px`
+        badge.style.top = `${top}px`
+        badge.addEventListener('mousedown', (event: MouseEvent) => {
+          // Keep the reader's gesture handling (and text selection) out of it.
+          event.preventDefault()
+          event.stopPropagation()
+        })
+        badge.addEventListener('click', (event: MouseEvent) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const box = badge.getBoundingClientRect()
+          openNoteEditor(highlight.id, box.left, box.top)
+        })
+        badgeLayer.append(badge)
+      }
+    }
     hitRects.current.set(pageNumber, painted)
-  }, [])
+  }, [openNoteEditor])
 
   // A hidden tab stays mounted, so the open paper cannot disappear; only the
   // heavy PDF resources are dropped, and only once the tab has really been
@@ -388,6 +487,9 @@ export function PdfViewer({
       if (element !== null && element !== undefined && element.childElementCount > 0) element.replaceChildren()
     }
     for (const element of hlRefs.current) {
+      if (element !== null && element !== undefined && element.childElementCount > 0) element.replaceChildren()
+    }
+    for (const element of badgeRefs.current) {
       if (element !== null && element !== undefined && element.childElementCount > 0) element.replaceChildren()
     }
     hitRects.current.clear()
@@ -511,6 +613,8 @@ export function PdfViewer({
     if (textEl !== null && textEl !== undefined && textEl.childElementCount > 0) textEl.replaceChildren()
     const layer = hlRefs.current[pageNumber - 1]
     if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
+    const badgeLayer = badgeRefs.current[pageNumber - 1]
+    if (badgeLayer !== null && badgeLayer !== undefined && badgeLayer.childElementCount > 0) badgeLayer.replaceChildren()
     hitRects.current.delete(pageNumber)
     const canvas = canvasRefs.current[pageNumber - 1]
     if (canvas !== null && canvas !== undefined && canvas.width > 1) {
@@ -619,6 +723,7 @@ export function PdfViewer({
     setShowNotes(false)
     setSelection(null)
     setNoteEditor(null)
+    setCachedOcrPages(0)
     restoreRef.current = readPosition(storageKey)
     void (async () => {
       try {
@@ -661,6 +766,9 @@ export function PdfViewer({
       builtLayers.current.clear()
       hitRects.current.clear()
       for (const layer of hlRefs.current) {
+        if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
+      }
+      for (const layer of badgeRefs.current) {
         if (layer !== null && layer !== undefined && layer.childElementCount > 0) layer.replaceChildren()
       }
       docRef.current = null
@@ -864,6 +972,7 @@ export function PdfViewer({
           const body = (await response.json()) as { done?: unknown; pages?: unknown }
           if (Array.isArray(body.done)) {
             for (const page of body.done) if (typeof page === 'number') alreadyOcred.add(page)
+            if (!disposed) setCachedOcrPages(alreadyOcred.size)
           }
           if (Array.isArray(body.pages)) {
             for (const entry of body.pages) {
@@ -973,6 +1082,79 @@ export function PdfViewer({
     setScale(previous => clampZoom(previous * factor))
   }, [cancelJob])
 
+  /**
+   * Ctrl/Cmd+wheel zoom, as its own non-passive listener so `preventDefault()`
+   * can stop the browser's own page zoom and so the gesture never scrolls the
+   * reader. The content point under the cursor is remembered as a fraction of the
+   * page under it; a layout effect applies the matching scroll once the new page
+   * sizes are committed (no layout reads here beyond the one offsetHeight of the
+   * page being anchored, and none in the scroll handler).
+   */
+  const applyWheelZoom = useCallback((event: WheelEvent): void => {
+    if (!event.ctrlKey && !event.metaKey) return
+    event.preventDefault()
+    const scroller = scrollRef.current
+    if (scroller === null) return
+    // deltaMode 1 = lines, 2 = pages: normalise both to a pixel-ish delta.
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, scroller.clientHeight) : 1
+    const factor = Math.exp(-event.deltaY * unit * WHEEL_ZOOM_RATE)
+    // Compound from the last requested scale, not only from the committed one:
+    // a trackpad pinch fires several wheel events before React re-renders.
+    const previous = pendingScale.current ?? scaleRef.current
+    const next = clampZoom(previous * factor)
+    pendingScale.current = next
+    if (next === previous) return
+    const rect = scroller.getBoundingClientRect()
+    const viewportY = event.clientY - rect.top
+    const contentY = scroller.scrollTop + viewportY
+    const offsets = offsetsRef.current
+    let pageIndex = 0
+    for (let index = 0; index < offsets.length && index < pageRefs.current.length; index += 1) {
+      if ((offsets[index] ?? 0) <= contentY) pageIndex = index
+    }
+    const pageEl = pageRefs.current[pageIndex]
+    const pageTop = offsets[pageIndex] ?? 0
+    const pageHeight = pageEl?.offsetHeight ?? 0
+    const ratio = pageHeight > 0 ? Math.min(1, Math.max(0, (contentY - pageTop) / pageHeight)) : 0
+    zoomAnchor.current = { scale: next, page: pageIndex + 1, ratio, viewportY }
+    ocrScheduler.current?.noteActivity()
+    for (const page of jobs.current.keys()) cancelJob(page)
+    setScale(next)
+  }, [cancelJob])
+
+  useEffect(() => { wheelZoomRef.current = applyWheelZoom }, [applyWheelZoom])
+
+  // A fresh document reload swaps nothing in the DOM (the scroller is always
+  // mounted), so one registration lasts the viewer's lifetime.
+  useEffect(() => {
+    const scroller = scrollRef.current
+    if (scroller === null) return
+    const onWheel = (event: WheelEvent): void => wheelZoomRef.current(event)
+    scroller.addEventListener('wheel', onWheel, { passive: false })
+    return () => scroller.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // The pages have their new sizes by the layout phase, so the anchor can be
+  // applied before the browser paints the zoom: no visible jump between the
+  // scale change and the corrected scroll offset.
+  useLayoutEffect(() => {
+    const anchor = zoomAnchor.current
+    if (anchor === null) return
+    zoomAnchor.current = null
+    if (anchor.scale !== scale) return
+    const scroller = scrollRef.current
+    const pageEl = pageRefs.current[anchor.page - 1]
+    if (scroller === null || pageEl === null || pageEl === undefined) return
+    const height = pageEl.offsetHeight
+    if (height <= 0) return
+    scroller.scrollTop = Math.max(0, pageEl.offsetTop + height * anchor.ratio - anchor.viewportY)
+    measureOffsets()
+    if (anchor.page !== currentPageRef.current) {
+      setCurrentPage(anchor.page)
+      savePosition(anchor.page)
+    }
+  }, [measureOffsets, savePosition, scale])
+
   const clearSelection = useCallback((): void => {
     setSelection(null)
     window.getSelection()?.removeAllRanges()
@@ -1076,18 +1258,8 @@ export function PdfViewer({
       }
       return
     }
-    const highlight = highlightsRef.current.find(candidate => candidate.id === clickedId)
-    if (highlight === undefined) return
-    const pane = scrollRef.current?.getBoundingClientRect()
-    const left = pane?.left ?? 0
-    const width = pane?.width ?? 360
-    setNoteEditor({
-      id: highlight.id,
-      note: highlight.note,
-      x: Math.max(8, Math.min(event.clientX, left + width - 240)),
-      y: Math.max(8, event.clientY - 20),
-    })
-  }, [commitSelection, highlightAt, replaySelection])
+    openNoteEditor(clickedId, event.clientX, event.clientY)
+  }, [commitSelection, highlightAt, openNoteEditor, replaySelection])
 
   const selectionAction = useCallback((action: 'quote' | 'explain' | 'translate' | 'copy'): void => {
     if (selection === null) return
@@ -1133,12 +1305,103 @@ export function PdfViewer({
     setNoteEditor(null)
   }, [noteEditor, onUpdateNote])
 
+  /**
+   * Reveal one stored highlight: scroll it near the top of the pane, not to its
+   * page top, and open its note editor. Geometry is only available on a built
+   * text layer, so a cold page gets built on demand; the retry is bounded and
+   * falls back to the page jump when the quote cannot be located at all.
+   */
   const scrollToHighlight = useCallback((highlight: Highlight): void => {
-    jumpTo(highlight.page)
-    const pane = scrollRef.current?.getBoundingClientRect()
-    setNoteEditor({ id: highlight.id, note: highlight.note, x: Math.max(8, (pane?.left ?? 8) + 8), y: 120 })
+    const page = Math.min(Math.max(1, highlight.page), Math.max(1, numPages))
+    const openEditor = (): void => {
+      const pane = scrollRef.current?.getBoundingClientRect()
+      openNoteEditor(highlight.id, (pane?.left ?? 8) + 8, 140)
+    }
+    const reveal = (): boolean => {
+      const scroller = scrollRef.current
+      const pageEl = pageRefs.current[page - 1]
+      const painted = hitRects.current.get(page)?.find(entry => entry.id === highlight.id)
+      if (scroller === null || pageEl === null || pageEl === undefined || painted === undefined || painted.rects.length === 0) return false
+      const top = offsetsRef.current[page - 1] ?? pageEl.offsetTop
+      scroller.scrollTop = Math.max(0, top + painted.rects[0].y - HIGHLIGHT_REVEAL_OFFSET)
+      if (page !== currentPageRef.current) {
+        setCurrentPage(page)
+        savePosition(page)
+      }
+      return true
+    }
     setShowNotes(false)
-  }, [jumpTo])
+    if (reveal()) {
+      openEditor()
+      return
+    }
+    void buildTextLayer(page).then(() => {
+      const deadline = performance.now() + HIGHLIGHT_REVEAL_TIMEOUT_MS
+      const attempt = (): void => {
+        if (reveal()) {
+          openEditor()
+          return
+        }
+        if (performance.now() >= deadline) {
+          jumpTo(page)
+          openEditor()
+          return
+        }
+        window.requestAnimationFrame(attempt)
+      }
+      window.requestAnimationFrame(attempt)
+    })
+  }, [buildTextLayer, jumpTo, numPages, openNoteEditor, savePosition])
+
+  /** Build the paper-digest prompt from what the viewer already knows. */
+  const buildDigestPrompt = useCallback((): string => {
+    const sections = (outline ?? [])
+      .map(row => row.title.trim())
+      .filter(title => title !== '' && title !== '·')
+      .slice(0, DIGEST_SECTION_LIMIT)
+    const scanned = cachedOcrPages + (ocrProgress?.done ?? 0) > 0 ? t('digestOcrYes') : t('digestOcrNo')
+    const chapters = sections.length > 0 ? sections.join(' / ') : outline === null ? t('digestUnavailable') : t('digestNone')
+    return [
+      t('digestIntro'),
+      '',
+      t('digestInfoHead'),
+      `${t('digestTitleLabel')}${name === undefined || name.trim() === '' ? t('digestNone') : name.trim()}`,
+      `${t('digestPagesLabel')}${numPages > 0 ? String(numPages) : '?'}`,
+      `${t('digestSectionsLabel')}${chapters}`,
+      `${t('digestOcrLabel')}${scanned}`,
+      '',
+      t('digestInstructions'),
+    ].join('\n')
+  }, [cachedOcrPages, name, numPages, ocrProgress, outline, t])
+
+  /**
+   * Deliver the digest prompt as one draft mutation, never an auto-send: the
+   * user reviews the prompt in the composer. The clipboard is the visible
+   * fallback when the conversation composer is not reachable.
+   */
+  const generateDigest = useCallback((): void => {
+    const prompt = buildDigestPrompt()
+    let drafted = false
+    try {
+      drafted = onDigest?.(prompt) === true
+    } catch (error) {
+      console.warn('[paper-reader] digest delivery failed', error)
+      drafted = false
+    }
+    if (drafted) {
+      announce(t('digestSent'))
+      return
+    }
+    const clipboard: Clipboard | undefined = navigator.clipboard
+    if (clipboard === undefined || typeof clipboard.writeText !== 'function') {
+      announce(t('digestFailed'))
+      return
+    }
+    void clipboard.writeText(prompt).then(
+      () => announce(t('digestCopied')),
+      () => announce(t('digestFailed')),
+    )
+  }, [announce, buildDigestPrompt, onDigest, t])
 
   // The page list is rebuilt only when the document or zoom changes: a scroll
   // tick then re-renders the toolbar and indicator alone, not every wrapper.
@@ -1157,6 +1420,9 @@ export function PdfViewer({
       // layer, never interactive (click hit-testing uses the stored rects).
       h('div', { className: 'pr-hl-layer', ref: (element: HTMLDivElement | null): void => { hlRefs.current[index] = element } }),
       h('div', { className: 'pr-text', ref: (element: HTMLDivElement | null): void => { textRefs.current[index] = element } }),
+      // Note badges sit above the text layer (only the dots take pointer events),
+      // in the right page margin, repainted with the rectangle overlay.
+      h('div', { className: 'pr-badge-layer', ref: (element: HTMLDivElement | null): void => { badgeRefs.current[index] = element } }),
     )
   }), [numPages, scale, sizes])
 
@@ -1175,6 +1441,9 @@ export function PdfViewer({
         type: 'button', className: 'pr-btn', title: t('notes'), 'aria-pressed': showNotes ? 'true' : 'false',
         onClick: () => { setShowNotes(value => !value); setShowSearch(false); setShowOutline(false) },
       }, t('notes')),
+      h('button', {
+        type: 'button', className: 'pr-btn', title: t('digest'), onClick: generateDigest,
+      }, t('digest')),
       h('span', { className: 'pr-spacer' }),
       ocrProgress !== null && h('span', { className: 'pr-ocr', title: t('ocrHint') }, `${t('ocr')} ${ocrProgress.done}/${ocrProgress.total}`),
       h('button', { type: 'button', className: 'pr-btn', title: t('zoomOut'), onClick: () => zoomBy(1 / 1.2) }, '−'),
@@ -1229,7 +1498,9 @@ export function PdfViewer({
     h('div', { className: 'pr-pages', ref: scrollRef, onScroll, onMouseUp, onMouseDown },
       status === 'loading' && h('div', { className: 'pr-status' }, t('loading')),
       status === 'error' && h('div', { className: 'pr-status' }, failure),
-      status === 'ready' && pageElements,
+      // The inner column is `width:max-content`: centered while the pages fit, and
+      // a real horizontally scrollable strip of pages when a zoomed page is wider.
+      status === 'ready' && h('div', { className: 'pr-pages-inner' }, pageElements),
     ),
     selection !== null && h('div', {
       className: 'pr-sel',
