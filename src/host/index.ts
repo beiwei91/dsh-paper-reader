@@ -101,13 +101,15 @@ function isLocalOrigin(origin: string): boolean {
  * the user happens to have open, not authentication — a non-browser local client
  * can set any header it likes, so requiring an exact Origin never kept one out.
  * What a browser page *cannot* do is reach these handlers from another site:
- * every write here is a `PUT`/`DELETE`, a JSON body, a PDF upload or a PNG OCR
- * body, so a cross-origin page's request is stopped by a CORS preflight, and this
- * route never answers `OPTIONS` or sends an allow-listed CORS response. A remote
- * page can therefore only produce an http(s) Origin, which must be loopback to
- * pass; an absent Origin (desktop shell / non-browser client) or `Origin: null`
- * (opaque origin) is accepted because it cannot be a remote page's write. Reads
- * stay unchanged and need no Origin at all.
+ * every write here is a `PUT`/`DELETE` (neither can be issued in `no-cors` mode)
+ * or a `POST` whose body must carry a content type outside the `no-cors` "simple"
+ * set (`application/json`, `application/pdf` or `image/png`), so a cross-origin
+ * page's request is stopped by a CORS preflight, and this route never answers
+ * `OPTIONS` or sends an allow-listed CORS response. A remote page can therefore
+ * only produce an http(s) Origin, which must be loopback to pass; an absent
+ * Origin (desktop shell / non-browser client) or `Origin: null` (opaque origin)
+ * is accepted because, with those content-type checks, it cannot be a remote
+ * page's write. Reads stay unchanged and need no Origin at all.
  */
 function writeAllowed(headers: IncomingMessageLike['headers']): boolean {
   if (!isLoopbackHost(headers.host)) return false
@@ -120,6 +122,16 @@ function writeAllowed(headers: IncomingMessageLike['headers']): boolean {
 function contentTypeOf(request: IncomingMessageLike): string {
   const type = request.headers['content-type']
   return typeof type === 'string' ? type.trim().toLowerCase() : ''
+}
+
+/**
+ * Whether a JSON-body route got the content type it requires. `application/json`
+ * is outside the browser's no-cors "simple" set, so requiring it forces a
+ * cross-origin page into a preflight this route never answers; without the check
+ * a `text/plain` no-cors POST (origin `null`) could still carry the JSON body.
+ */
+function isJsonContentType(request: IncomingMessageLike): boolean {
+  return contentTypeOf(request).startsWith('application/json')
 }
 
 /** Refuse a write whose Origin is not local, naming the value for the UI. */
@@ -252,6 +264,12 @@ export function apply(ctx: HostContext): void {
             denyOrigin(request, response)
             return
           }
+          // JSON only: the route's body is JSON, and requiring that content type
+          // also keeps cross-origin no-cors bodies (always "simple" types) away.
+          if (!isJsonContentType(request)) {
+            sendJson(response, 415, { error: 'bad-content-type' })
+            return
+          }
           const body = parseJsonBody(await readBody(request, JSON_BODY_LIMIT)) as {
             key?: unknown
             highlights?: unknown
@@ -304,6 +322,13 @@ export function apply(ctx: HostContext): void {
         if (request.method === 'POST' && url.pathname === `${ROUTE}/current`) {
           if (!writeAllowed(request.headers)) {
             denyOrigin(request, response)
+            return
+          }
+          // An opaque-origin (`Origin: null`) no-cors POST can carry any body as a
+          // simple `text/plain` request; requiring JSON keeps that pointer write
+          // behind a preflight.
+          if (!isJsonContentType(request)) {
+            sendJson(response, 415, { error: 'bad-content-type' })
             return
           }
           const body = parseJsonBody(await readBody(request, JSON_BODY_LIMIT)) as {
@@ -459,6 +484,12 @@ export function apply(ctx: HostContext): void {
         if (request.method === 'POST' && url.pathname === `${ROUTE}/arxiv/open`) {
           if (!writeAllowed(request.headers)) {
             denyOrigin(request, response)
+            return
+          }
+          // Same rule as `/current`: a JSON content type is required so the route
+          // is unreachable from a cross-origin `no-cors` form/text POST.
+          if (!isJsonContentType(request)) {
+            sendJson(response, 415, { error: 'bad-content-type' })
             return
           }
           const body = parseJsonBody(await readBody(request, JSON_BODY_LIMIT)) as {

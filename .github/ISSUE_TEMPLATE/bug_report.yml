@@ -20,7 +20,7 @@ body:
     attributes:
       label: Paper Reader version / 插件版本
       description: npm package version, or the git commit for a local-directory install.
-      placeholder: "0.1.0 / commit 533c6a7"
+      placeholder: "0.1.0 / release tag / commit hash"
     validations:
       required: true
   - type: dropdown

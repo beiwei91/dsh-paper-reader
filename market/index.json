@@ -1,13 +1,13 @@
 {
   "format": 1,
-  "_note": "Self-hosted format-1 plugin index example (validated by @deepseek-ai/dsh-plugin-market-index). Replace 0000000000000000000000000000000000000000 with the 40-hex commit of the v0.1.0 tag (git rev-list -n1 v0.1.0) before serving this file; also refresh publishTimestamp. The _note key is ignored by the validator.",
+  "_note": "TEMPLATE ONLY — this file is not a published index. Before serving or linking to it, replace \"commit\" with the 40-hex commit of the release tag (git rev-list -n1 v0.1.0) and refresh publishTimestamp with the real Unix-seconds time; the placeholder below is deliberately invalid so a copy-pasted template cannot be mistaken for a real listing. See docs/PUBLISHING.md §16.2. The _note key is ignored by the validator.",
   "title": {
-    "en": "Paper Reader plugin index",
-    "zh": "论文阅读器插件索引"
+    "en": "Paper Reader plugin index (TEMPLATE — replace the commit placeholder)",
+    "zh": "论文阅读器插件索引（模板 — 请替换 commit 占位符）"
   },
   "description": {
-    "en": "Format-1 index for the Paper Reader DSH plugin (GitHub-only distribution).",
-    "zh": "论文阅读器 DSH 插件的 format-1 索引（GitHub 分发）。"
+    "en": "Format-1 index template for the Paper Reader DSH plugin (GitHub-only distribution).",
+    "zh": "论文阅读器 DSH 插件的 format-1 索引模板（GitHub 分发）。"
   },
   "plugins": [
     {
@@ -33,7 +33,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/beiwei91/dsh-paper-reader",
-            "commit": "0000000000000000000000000000000000000000"
+            "commit": "<40-hex commit of this repo, e.g. git rev-list -n1 v0.1.0>"
           }
         }
       ]

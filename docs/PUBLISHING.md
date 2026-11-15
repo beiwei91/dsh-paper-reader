@@ -40,6 +40,7 @@
 - 仓库根 **`THIRD-PARTY-LICENSES.md`** 已提供：说明 PDF.js 以未修改的形式再分发（embedded in generated `lib/host.js` / `client.pdf.js`，copied as `lib/pdf.worker.mjs`），并逐字收录 `node_modules/pdfjs-dist/LICENSE` 的 Apache-2.0 全文（177 行）与 Mozilla 版权行。
 - GitHub-only 分发同样构成“再分发”，所以该文件必须在**发布 tag 的 commit 里存在**（已提交），并且已显式加入 `package.json.files`（§5），`pnpm pack` 与未来 npm 打包都会带上。
 - 注意：依赖由并发 agent 改动/重装，`node_modules/pdfjs-dist` 可能被更新。发布前确认版本仍是 **6.3.289**（`node -p "require('pdfjs-dist/package.json').version"`）；若变化，按新 `LICENSE` 重新生成 `THIRD-PARTY-LICENSES.md`。
+- **OCR 栈的许可证也已补齐（2026-11-15）**：`lib/ocr/**` 里内置的 ~7.5 MiB 代码与数据同样构成再分发。`THIRD-PARTY-LICENSES.md` 现按包逐项收录 `tesseract.js`（Apache-2.0）、`tesseract.js-core`（Apache-2.0）、`@tesseract.js-data/eng` + `chi_sim`（`package.json` 声明 MIT，语言数据源自 Apache-2.0 的 `tessdata_best`）、`node-fetch@2`（MIT）、`regenerator-runtime`（MIT）、`wasm-feature-detect`（Apache-2.0），以及同一 `build.mjs` 顺带打进 bundle 的 `whatwg-url`、`webidl-conversions`、`tr46`、`bmp-js`、`is-url`。两个语言数据包和 `tr46` 不随包提供 LICENSE 文件，文件里已显式标注这一点，并按各自 `package.json` 的 `license`/`repository`/`author` 字段给出声明（不虚构版权行）。
 
 ### 0.3 本轮发布前的实际待办
 
@@ -210,6 +211,7 @@ git diff --stat -- client.js client.pdf.js lib/
 - **实测现状（2026-11-14，`files` 精确化后）**：`pnpm pack --dry-run` 输出 **21** 个文件（`client.js`、`client.pdf.js`、`cordis.patch.yml`、`docs/DETAIL.md`、`docs/preview.svg`、`icon.svg`、`lib/host.js`、`lib/ocr/engine.cjs`、`lib/ocr/engine-impl.cjs`、`lib/ocr/worker.cjs`、`lib/ocr/tesseract-core-lstm.wasm`、`lib/ocr/tesseract-core-simd-lstm.wasm`、`lib/ocr/lang/eng.traineddata.gz`、`lib/ocr/lang/chi_sim.traineddata.gz`、`lib/pdf.worker.mjs`、`LICENSE`、`locale/en.json`、`locale/zh.json`、`package.json`、`README.md`、`THIRD-PARTY-LICENSES.md`）；tarball 名 `dsh-paper-reader-0.1.0.tgz`（实测 **8,227,726 B ≈ 7.85 MiB**，`tar -tzf` 数得 21 个 entry）。
 - **`files` 已精确化**（2026-11-14 的打包修正 commit）：`"docs"` → `"docs/DETAIL.md"` + `"docs/preview.svg"`，并显式加入 `"THIRD-PARTY-LICENSES.md"`。因此内部发布文档（`docs/PUBLISHING.md`、`docs/README.draft.md`、`docs/OCR-VERIFICATION.md`）**不再进包**，而 `THIRD-PARTY-LICENSES.md` **会**进包（`LICENSE` 仍由 npm 按惯例自动带）。包内**没有** `src/**`、`.github/**`、`scripts/**`、`market/**`、`.build/**`、`build.mjs`、`tsconfig.json`、lockfile、`testdata/**`。
 - **`files` 里的 `"client.*.js"` 是宽通配**：它目前只匹配 `client.pdf.js`（`client.js` 由前面的精确项覆盖）；将来若新增 `client.<name>.js`，会被**无提示**一并打进包。这是有意保留的便利，风险可接受；新增客户端产物时要复核 `pnpm pack --dry-run` 清单。
+- **tarball 里的 `scripts` 是“有脚本、无源码”**：`package.json` 仍带 `scripts.build`（`node build.mjs`）与 `scripts.typecheck`（`tsc -p tsconfig.json`），但 `files` 不含 `src/**`、`build.mjs`、`tsconfig.json` 和 devDependencies；从 tarball 安装后这两个脚本无法运行。它们只在 git 安装 / 源码仓里有意义（这也是保留二者、不把脚本移出 `package.json` 的原因）。
 - **仍留在仓库、但不进包**：`docs/OCR-VERIFICATION.md`、`docs/PUBLISHING.md`、`docs/README.draft.md` 仍是仓库文件，GitHub 源码归档会包含它们。**已决定保留在公开仓库**（理由与要求见 §15.1）。
 - **对 GitHub-only 的影响**：tarball 现在既含 `THIRD-PARTY-LICENSES.md`（许可证合规）又不含内部文档，**可以直接作为 Release 资产**；GitHub 自动生成的源码归档（`tar.gz`/`zip`，含仓库全部 tracked 文件）同样可用。
 - npm 发布日目标清单：与上面的实测清单完全一致（21 项；`lib/ocr/**` 为 7 个文件：`engine.cjs`/`engine-impl.cjs`/`worker.cjs` + 2 个 WASM core + 2 个语言包）。`files` 已是最终形态，npm 日只需叠加 §3 diff 里剩余的 `engines`/`publishConfig`/`description`/`exports` 项。
@@ -499,6 +501,11 @@ git push origin v0.1.0
 
 文件：`market/beiwei91__dsh-paper-reader.yml`。字段取自已安装 `dshmarket@1.73.19` 的运行时目录类型（`Registry` / `RegistryPlugin`：`name`/`owner`/`url`/`category`/`description`/`install`/`added`，可选 `tarball`/`icon`）；`screenshots` 是 awesome 仓库单独的 `screenshots.json`（**UNVERIFIED** 格式），不在本 YAML 内。
 
+- 目标路径（**UNVERIFIED**）：awesome 仓库的 `data/plugins/beiwei91__dsh-paper-reader.yml`；提 PR 前按该仓库的 `CONTRIBUTING`/CI 核对路径、文件名与字段（本机未访问 GitHub 核对，2026-11-14 起草时的假设）。
+- `market/` 里的 YAML 保持**无注释、可直接复制粘贴**，未验证事项只记录在本节，不写回文件。
+- `added` 填条目实际加入目录的日期（文件里的 `2026-11-14` 是起草日期，PR 时按当天或维护者要求填写）。
+- 第三方插件发布说明提到的其它 CI 门槛（**UNVERIFIED**）：`package.json` 必须声明 `dsh.bundle`（已声明）；仓库需 ≥1 天；GitHub 仓库需 `dsh-plugin` topic；描述需与代码一致、避免营销语言。
+
 ```yaml
 name: dsh-paper-reader
 owner: beiwei91
@@ -518,12 +525,12 @@ category: productivity   # UNVERIFIED enum：PR 前换成 awesome 仓库允许�
 
 ### 16.2 自托管 format-1 index（不依赖 awesome 收录）
 
-文件：`market/index.json`。这是一个**可直接自托管**的 format-1 index 示例（`@deepseek-ai/dsh-plugin-market-index` 的 `parseMarketIndex` 规则；未知字段被忽略）：
+文件：`market/index.json`。这是一个**模板（TEMPLATE）**，不是可直接服务的索引：JSON 有效，但 `commit` 是**显而易见的占位符**（`"<40-hex commit of this repo, e.g. git rev-list -n1 v0.1.0>"`），`_note` 与 `title` 也标注了 TEMPLATE。format-1 解析器（`@deepseek-ai/dsh-plugin-market-index` 的 `parseMarketIndex`；未知字段被忽略）要求 40 位小写 hex，因此模板**故意**通不过校验，避免被当成真实索引误用；替换 `commit` 与 `publishTimestamp` 后再校验/发布。
 
 ```json
 {
   "format": 1,
-  "title": { "en": "Paper Reader plugin index", "zh": "论文阅读器插件索引" },
+  "title": { "en": "Paper Reader plugin index (TEMPLATE — replace the commit placeholder)", "zh": "论文阅读器插件索引（模板 — 请替换 commit 占位符）" },
   "plugins": [{
     "name": "dsh-paper-reader",
     "title": { "en": "Paper Reader", "zh": "论文阅读器" },
@@ -537,14 +544,14 @@ category: productivity   # UNVERIFIED enum：PR 前换成 awesome 仓库允许�
       "source": {
         "type": "git",
         "url": "https://github.com/beiwei91/dsh-paper-reader",
-        "commit": "0000000000000000000000000000000000000000"
+        "commit": "<40-hex commit of this repo, e.g. git rev-list -n1 v0.1.0>"
       }
     }]
   }]
 }
 ```
 
-- 把 `commit` 换成 `v0.1.0` 的 40 位 commit（`git rev-list -n1 v0.1.0`）、`publishTimestamp` 换成实际 Unix 秒；`engines.dsh` 可选（本轮未声明，可省略）。
+- 发布前把 `commit` 换成 `v0.1.0` 的 40 位 commit（`git rev-list -n1 v0.1.0`）、`publishTimestamp` 换成实际 Unix 秒（模板里的 `1794662000` 只是占位数值）；`engines.dsh` 可选（本轮未声明，可省略）。
 - 发布到仓库后，用户消费步骤：
   1. 启用 DSH 随装的可选 custom-index bundle：`@deepseek-ai/dsh-experimental-plugin-market-bundle`（shipped profiles 默认不启用；用 `plugin_manager`/profile bundles 启用；具体入口以当前 UI 为准）。
   2. **Plugins → Discover → Add index source**，填入 index 的 URL，例如 `https://raw.githubusercontent.com/beiwei91/dsh-paper-reader/v0.1.0/market/index.json`（或 jsDelivr 镜像）。
@@ -567,8 +574,8 @@ agent 用 `plugin_manager` → `install_bundle`，target 填同一 spec。
 
 | 谁 | 步骤 |
 |---|---|
-| **用户** | 给 `beiwei91/dsh-paper-reader` 加 GitHub topic **`dsh-plugin`**；确保仓库满 1 天；（§2 改名 + 重建已完成）打 tag `v0.1.0` 并创建 Release；fork `awesome-dsh-plugin/awesome-dsh-plugin`，把 `market/beiwei91__dsh-paper-reader.yml` 复制为 `data/plugins/beiwei91__dsh-paper-reader.yml` 并提 PR（按该仓库 CI/分类要求调整 `category` 和格式）；可选：补真实截图 `screenshots.json`；可选：自托管 `market/index.json`（替换 commit 后发布）。 |
-| **我们（已交付）** | `market/beiwei91__dsh-paper-reader.yml`（PR 条目）、`market/index.json`（format-1 自托管示例，已按 `parseMarketIndex` 规则人工校验）、`docs/PUBLISHING.md` 的 release checklist（§2、§11、§13）。 |
+| **用户** | 给 `beiwei91/dsh-paper-reader` 加 GitHub topic **`dsh-plugin`**；确保仓库满 1 天；（§2 改名 + 重建已完成）打 tag `v0.1.0` 并创建 Release；fork `awesome-dsh-plugin/awesome-dsh-plugin`，把 `market/beiwei91__dsh-paper-reader.yml` 复制为 `data/plugins/beiwei91__dsh-paper-reader.yml` 并提 PR（按该仓库 CI/分类要求调整 `category` 和格式）；可选：补真实截图 `screenshots.json`；可选：自托管 `market/index.json`（模板，替换 `commit` 占位符后发布）。 |
+| **我们（已交付）** | `market/beiwei91__dsh-paper-reader.yml`（PR 条目，无内部注释）、`market/index.json`（format-1 自托管**模板**，`commit` 为故意明显的占位符，未作为真实索引交付）、`docs/PUBLISHING.md` 的 release checklist（§2、§11、§13）；市场条目的未验证事项集中在 §16.1/§16.2。 |
 | **共同** | §14 运行时验证；未来 npm 发布日决定最终 npm 名（`dsh-paper-reader` 已被占用，需 scope 或 free 名）。 |
 
 ## 17. 本次核对用到的证据

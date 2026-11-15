@@ -45,68 +45,83 @@ function retryDelay(attempt) {
   return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1));
 }
 function createAnnotationSaveQueue(deps) {
-  let pending = null;
-  let inFlight = false;
-  let attempt = 0;
-  let timer = null;
-  let newest = 0;
-  function dispatch(write, keepalive) {
-    const id = newest + 1;
-    newest = id;
-    inFlight = true;
+  const states = /* @__PURE__ */ new Map();
+  function stateOf(key) {
+    let state = states.get(key);
+    if (state === void 0) {
+      state = { pending: null, inFlight: false, attempt: 0, timer: null, newest: 0 };
+      states.set(key, state);
+    }
+    return state;
+  }
+  function retire(key, state) {
+    if (state.inFlight || state.pending !== null || state.timer !== null) return;
+    if (states.get(key) === state) states.delete(key);
+  }
+  function dispatch(state, write, keepalive) {
+    const id = state.newest + 1;
+    state.newest = id;
+    state.inFlight = true;
     void deps.put(write, keepalive).then((result) => {
-      if (id !== newest) {
+      if (id !== state.newest) {
         if (!result.ok) deps.report({ kind: "save", status: result.status, code: result.code, retrying: false });
         return;
       }
-      inFlight = false;
+      state.inFlight = false;
       if (result.ok) {
-        attempt = 0;
+        state.attempt = 0;
         deps.report(null);
-        if (pending !== null) pump();
+        if (state.pending !== null) pump(state);
+        else retire(write.key, state);
         return;
       }
-      if (pending === null) pending = write;
-      attempt += 1;
-      const retrying = attempt < SAVE_ATTEMPTS;
+      if (state.pending === null) state.pending = write;
+      state.attempt += 1;
+      const retrying = state.attempt < SAVE_ATTEMPTS;
       deps.report({ kind: "save", status: result.status, code: result.code, retrying });
       if (!retrying) return;
-      if (timer !== null) deps.clearTimer(timer);
-      timer = deps.setTimer(() => {
-        timer = null;
-        pump();
-      }, retryDelay(attempt));
+      if (state.timer !== null) deps.clearTimer(state.timer);
+      state.timer = deps.setTimer(() => {
+        state.timer = null;
+        pump(state);
+      }, retryDelay(state.attempt));
     });
   }
-  function pump() {
-    if (inFlight) return;
-    const write = pending;
+  function pump(state) {
+    if (state.inFlight) return;
+    const write = state.pending;
     if (write === null) return;
-    pending = null;
-    dispatch(write, false);
+    state.pending = null;
+    dispatch(state, write, false);
   }
   return {
     enqueue(key, highlights) {
-      pending = { key, highlights };
-      pump();
+      const state = stateOf(key);
+      state.pending = { key, highlights };
+      pump(state);
     },
     flush(keepalive = false) {
-      if (timer !== null) {
-        deps.clearTimer(timer);
-        timer = null;
+      for (const [key, state] of states) {
+        if (state.timer !== null) {
+          deps.clearTimer(state.timer);
+          state.timer = null;
+        }
+        const write = state.pending;
+        if (write === null) {
+          retire(key, state);
+          continue;
+        }
+        state.pending = null;
+        if (!keepalive) {
+          state.pending = write;
+          pump(state);
+          continue;
+        }
+        dispatch(state, write, true);
       }
-      const write = pending;
-      if (write === null) return;
-      pending = null;
-      if (!keepalive) {
-        pending = write;
-        pump();
-        return;
-      }
-      dispatch(write, true);
     },
     resetAttempts() {
-      attempt = 0;
+      for (const state of states.values()) state.attempt = 0;
     }
   };
 }
@@ -455,6 +470,8 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
       setError(t("errorNoSession"));
       return;
     }
+    const sequence = openSeq.current + 1;
+    openSeq.current = sequence;
     setBusy(true);
     setError(null);
     abortRef.current?.abort();
@@ -462,6 +479,7 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
     abortRef.current = controller;
     try {
       const result = await reader.readBytes(sessionId, path, {}, controller.signal);
+      if (sequence !== openSeq.current) return;
       if (!result.ok) {
         setError(errorLine(result.error.code, t));
         return;
@@ -471,9 +489,9 @@ function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }) {
       const absolutePath = result.value.absolutePath || path;
       remember({ name: baseName(path), storageKey: absolutePath, bytes, readPath: absolutePath });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      if (alive.current) setBusy(false);
+      if (alive.current && sequence === openSeq.current) setBusy(false);
     }
   }, [pathInput, reader, remember, sessionId, t]);
   const openArxiv = (0, import_react2.useCallback)(async (idOrUrl, knownTitle) => {

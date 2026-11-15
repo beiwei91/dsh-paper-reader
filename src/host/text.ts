@@ -5,6 +5,9 @@
  * runtime dependency in the profile. Text is extracted once per paper and
  * cached beside the bytes, because a 300-page paper costs seconds to walk.
  */
+// Must evaluate before PDF.js so its Node-canvas import warnings stay out of the
+// Host log; it restores `console.warn` on the next microtask.
+import './pdfjsQuiet.ts'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { paperPaths, readBytes, readJson, writeJson } from './store.ts'
 

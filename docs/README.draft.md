@@ -15,7 +15,7 @@ GitHub 仓库：`https://github.com/beiwei91/dsh-paper-reader`（包名/loader �
 ![论文阅读器示意（功能示意，非真实截图）](docs/preview.svg)
 
 - 运行环境：DSH **0.2.2-rc.3** 上开发与验证（本轮**不声明** `engines.dsh`；未来 npm 发布日再按 `docs/PUBLISHING.md` §3 加）。
-- 命名：包名/loader id = **`dsh-paper-reader`**（来自 `package.json.name`），与 GitHub 仓库 `https://github.com/beiwei91/dsh-paper-reader` 同名。首发只走 **GitHub**（tag `v0.1.0`）；npm 发布为未来可选项（unscoped 名已被占用，见 docs/PUBLISHING.md §12）。
+- 命名：包名 / 模块 loader 名 = **`dsh-paper-reader`**（来自 `package.json.name`，也是 bundle patch 的 `name` 字段）；cordis 插件行 id = **`paper-reader`**（`cordis.patch.yml` 的 `id`）；GitHub 仓库 = **`https://github.com/beiwei91/dsh-paper-reader`**。首发只走 **GitHub**（tag `v0.1.0`）；npm 发布为未来可选项（unscoped 名已被占用，见 docs/PUBLISHING.md §12）。
 - 许可证：MIT；内置 PDF.js（Apache-2.0）的第三方许可见 `THIRD-PARTY-LICENSES.md`。
 
 ---

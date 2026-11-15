@@ -9,14 +9,14 @@
 | `0.1.x`（最新发布） | ✅ |
 | 更早版本 | ❌ |
 
-（尚未发布时，以仓库默认分支为准。）
+`v0.1.0` 尚未打 tag 时，以仓库默认分支的 HEAD 为准。
 
 ## 报告漏洞
 
-请**不要**公开提 issue。优先使用 GitHub 的私密漏洞报告：
+请**不要**公开提 issue。请使用 GitHub 的私密漏洞报告（本仓库只通过这个渠道接收安全报告）：
 
-- 仓库 **Security → Advisories → Report a vulnerability**；
-- 或邮件联系 `<OWNER>`（发布前填入维护者邮箱）。
+- 直接打开：**https://github.com/beiwei91/dsh-paper-reader/security/advisories/new**
+- 或：仓库 **Security → Advisories → Report a vulnerability**。
 
 报告时请说明：DSH 版本、操作系统、插件版本、复现步骤、影响（读取/写入/网络），以及一个最小复现（**不要附上受版权保护的论文 PDF**；如需样例请用你自己生成或公开许可的文件）。
 

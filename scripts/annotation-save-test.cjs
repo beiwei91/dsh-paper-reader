@@ -7,9 +7,13 @@
 //   node scripts/annotation-save-test.cjs
 //
 // It proves the write path the "highlights vanish after 换一篇" bug depended on:
-//   - one PUT in flight, newer states coalesced, and the newest state always sent;
+//   - one PUT in flight per paper, newer states coalesced, and the newest state
+//     always sent;
+//   - a paper switch never lets the new paper's snapshot replace the old paper's
+//     last edit (each storage key has its own in-flight slot);
 //   - a failure keeps the newest state, reports the status and retries (bounded);
-//   - a teardown flush(true) sends the newest state immediately with keepalive;
+//   - a teardown flush(true) sends each paper's newest state immediately with
+//     keepalive;
 //   - a stale settle never restores an older snapshot over a newer one.
 const { createAnnotationSaveQueue } = require('../.build/annotation-queue.cjs')
 
@@ -153,6 +157,43 @@ async function main() {
     check('bounded: at most 6 PUTs for one state', h.puts.length, 6)
     check('bounded: last problem stops retrying', h.problems.at(-1), { kind: 'save', status: 503, code: null, retrying: false })
     check('bounded: no retry timer left', h.timers.size, 0)
+  }
+
+  // 7. The queue is per paper key: switching papers while one PUT is in flight
+  //    must not replace the old paper's last snapshot with the new paper's state.
+  {
+    const h = harness()
+    const queue = createAnnotationSaveQueue(h.deps)
+    queue.enqueue('a', list('a1'))
+    queue.enqueue('a', list('a1', 'a2'))
+    check('per-key: paper a has exactly one PUT in flight', [h.puts.length, h.puts[0].write.key, idsOf(h.puts[0].write)], [1, 'a', ['a1']])
+    // Switch to paper b while a's PUT is still in flight, then edit a again.
+    queue.enqueue('b', list('b1'))
+    check('per-key: paper b dispatches despite a in flight', [h.puts.length, h.puts[1].write.key, idsOf(h.puts[1].write)], [2, 'b', ['b1']])
+    queue.flush()
+    check('per-key: flushing keeps both papers queued independently', h.puts.length, 2)
+    h.puts[0].resolve({ ok: true, status: 200, code: null })
+    await tick()
+    check("per-key: a's newest snapshot goes out after its own settle", [h.puts.length, h.puts[2].write.key, idsOf(h.puts[2].write)], [3, 'a', ['a1', 'a2']])
+    h.puts[1].resolve({ ok: true, status: 200, code: null })
+    await tick()
+    check("per-key: b's settle did not wait for a", [h.puts.length, h.problems.at(-1)], [3, null])
+    h.puts[2].resolve({ ok: true, status: 200, code: null })
+    await tick()
+    check('per-key: no duplicate or reordered sends', h.puts.length, 3)
+  }
+
+  // 8. Teardown flush(true) sends every paper's newest state, even mid-flight.
+  {
+    const h = harness()
+    const queue = createAnnotationSaveQueue(h.deps)
+    queue.enqueue('a', list('a1'))
+    queue.enqueue('b', list('b1'))
+    queue.enqueue('a', list('a1', 'a2'))
+    queue.enqueue('b', list('b1', 'b2'))
+    queue.flush(true)
+    const keepaliveSends = h.puts.filter(put => put.keepalive).map(put => [put.write.key, idsOf(put.write)])
+    check('teardown per-key: both papers flushed with keepalive', keepaliveSends, [['a', ['a1', 'a2']], ['b', ['b1', 'b2']]])
   }
 
   console.log(failures === 0 ? '\nall save-queue checks passed' : `\n${failures} check(s) FAILED`)

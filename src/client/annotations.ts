@@ -3,11 +3,13 @@
  * `/paper-reader/api/annotations` route.
  *
  * Every mutation is handed to the save queue immediately (no debounce): one PUT is
- * in flight, a state that arrives meanwhile is coalesced into the next one, and the
- * newest state is never dropped. Teardown paths — paper switch, `pagehide`, a
- * hidden tab, unmount — flush it with `keepalive` so the browser gets one last
- * chance to deliver it. A failed load or save becomes a visible problem and is
- * retried with bounded backoff instead of only reaching the console.
+ * in flight per paper (the queue keeps one slot per storage key, so switching
+ * papers cannot lose the old paper's last edit), a state that arrives meanwhile is
+ * coalesced into the next one, and the newest state is never dropped. Teardown
+ * paths — paper switch, `pagehide`, a hidden tab, unmount — flush every paper's
+ * newest state with `keepalive` so the browser gets one last chance to deliver it.
+ * A failed load or save becomes a visible problem and is retried with bounded
+ * backoff instead of only reaching the console.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createAnnotationSaveQueue, retryDelay } from './annotationQueue.ts'

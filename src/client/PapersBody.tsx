@@ -256,6 +256,10 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       setError(t('errorNoSession'))
       return
     }
+    // A second open supersedes this one; a slower, earlier read must not replace
+    // the paper the user asked for last (the same rule openArxiv follows).
+    const sequence = openSeq.current + 1
+    openSeq.current = sequence
     setBusy(true)
     setError(null)
     abortRef.current?.abort()
@@ -263,6 +267,7 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
     abortRef.current = controller
     try {
       const result = await reader.readBytes(sessionId as never, path, {}, controller.signal)
+      if (sequence !== openSeq.current) return
       if (!result.ok) {
         setError(errorLine((result.error as { code?: string }).code, t))
         return
@@ -272,9 +277,9 @@ export function PapersBody({ reader, t, inputActions, sessionId, useTabInfo }: P
       const absolutePath = result.value.absolutePath || path
       remember({ name: baseName(path), storageKey: absolutePath, bytes, readPath: absolutePath })
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      if (alive.current && sequence === openSeq.current) setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      if (alive.current) setBusy(false)
+      if (alive.current && sequence === openSeq.current) setBusy(false)
     }
   }, [pathInput, reader, remember, sessionId, t])
 
